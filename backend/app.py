@@ -19,7 +19,7 @@ from sensors import simulator
 from api_integration import gemini_text_request, gemini_image_request, extract_text_from_gemini_response
 import influx_storage  # 시계열 DB 모듈 추가
 import weather_api  # 날씨 API 모듈 추가
-from voice_chat_server import GeminiVoiceServer  # Voice chat 서버 추가
+# from voice_chat_server import GeminiVoiceServer  # Voice chat 서버 제거
 
 # 프롬프트 매니저 추가
 from prompt_manager import get_chatbot_prompt, get_image_prompt, get_error_message, prompt_manager
@@ -76,6 +76,7 @@ def get_status():
         "humidity": current_values["humidity"],
         "power": current_values["power"],
         "soil": current_values["soil"],
+        "co2": current_values["co2"],
         "devices": simulator.device_status,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     })
@@ -84,9 +85,45 @@ def get_status():
 def get_history():
     """측정 항목의 기록 데이터를 반환합니다."""
     metric = request.args.get('metric', 'temperature')
-    if metric not in ["temperature", "humidity", "power", "soil"]:
+    if metric not in ["temperature", "humidity", "power", "soil", "co2"]:
         return jsonify({"error": "유효하지 않은 측정 항목입니다."}), 400
-        
+    
+    # InfluxDB에서 데이터 가져오기 시도
+    try:
+        from influx_storage import influx_manager
+        if influx_manager.query_api:
+            # InfluxDB에서 최근 24시간 **하드웨어 데이터만** 조회
+            query = f'''
+            from(bucket: "smart_greenhouse")
+                |> range(start: -24h)
+                |> filter(fn: (r) => r._measurement == "sensor_data")
+                |> filter(fn: (r) => r.metric == "{metric}")
+                |> filter(fn: (r) => r._field == "value")
+                |> filter(fn: (r) => r.mode == "hardware")
+                |> aggregateWindow(every: 30m, fn: mean, createEmpty: false)
+                |> sort(columns: ["_time"])
+            '''
+            
+            result = influx_manager.query_api.query(org="iotctd", query=query)
+            
+            history = []
+            for table in result:
+                for record in table.records:
+                    history.append({
+                        "timestamp": record.get_time().strftime("%Y-%m-%d %H:%M:%S"),
+                        "value": round(record.get_value(), 2)
+                    })
+            
+            # InfluxDB에 데이터가 있으면 반환
+            if history:
+                print(f"[get_history] {metric} 하드웨어 데이터 반환: {len(history)}개")
+                return jsonify(history)
+            else:
+                print(f"[get_history] {metric} 하드웨어 데이터 없음, 시뮬레이터 데이터 사용")
+    except Exception as e:
+        print(f"InfluxDB 히스토리 조회 오류: {e}")
+    
+    # InfluxDB 실패 시 시뮬레이터 데이터 사용
     return jsonify(simulator.get_history(metric))
 
 @app.route('/api/control', methods=['POST'])
@@ -121,6 +158,27 @@ def reconnect_arduino():
         "message": "아두이노 재연결 성공" if success else "아두이노 재연결 실패",
         "status": status
     })
+
+@app.route('/api/influxdb/status', methods=['GET'])
+def get_influxdb_status():
+    """InfluxDB 연결 상태를 확인합니다."""
+    try:
+        from influx_storage import influx_manager
+        status = influx_manager.get_status() if hasattr(influx_manager, 'get_status') else {
+            "connected": influx_manager.client is not None,
+            "url": "http://localhost:8086",
+            "org": "iotctd",
+            "bucket": "smart_greenhouse"
+        }
+        return jsonify(status)
+    except Exception as e:
+        return jsonify({
+            "connected": False,
+            "error": str(e),
+            "url": "http://localhost:8086",
+            "org": "iotctd", 
+            "bucket": "smart_greenhouse"
+        })
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
@@ -183,6 +241,7 @@ def chat():
         humidity=simulator.current_values['humidity'],
         soil=simulator.current_values['soil'],
         power=simulator.current_values['power'],
+        co2=simulator.current_values['co2'],
         device_status=simulator.device_status,
         user_location=user_location,
         current_time=current_time,
@@ -337,19 +396,6 @@ def get_current_weather():
         }
     })
 
-def start_voice_server():
-    """Voice WebSocket 서버를 별도 스레드에서 시작"""
-    try:
-        voice_server = GeminiVoiceServer()
-        asyncio.run(voice_server.start_server(host='0.0.0.0', port=8766))
-    except Exception as e:
-        print(f"Voice server 시작 오류: {e}")
-
 if __name__ == '__main__':
-    # Voice WebSocket 서버를 백그라운드에서 시작
-    voice_thread = threading.Thread(target=start_voice_server, daemon=True)
-    voice_thread.start()
-    print("🎤 Voice WebSocket 서버가 포트 8766에서 시작되었습니다!")
-    
     # Flask 서버 시작
     app.run(debug=True, host='0.0.0.0', port=5001) 

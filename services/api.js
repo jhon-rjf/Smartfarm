@@ -231,24 +231,31 @@ export const fetchStatus = async () => {
  */
 export const fetchHistory = async (metric) => {
   try {
-    console.log(`${metric} 히스토리 데이터 요청 중...`);
-    const response = await fetch(`${API_URL}/api/history?metric=${metric}`);
-    console.log('히스토리 응답 코드:', response.status);
+    console.log(`[fetchHistory] ${metric} 히스토리 데이터 요청 중...`);
+    const response = await safeFetch(`${API_URL}/api/history?metric=${metric}`);
+    console.log(`[fetchHistory] 히스토리 응답 코드: ${response.status}`);
     
     if (!response.ok) {
       throw new Error(`서버 응답 오류: ${response.status}`);
     }
     
     const data = await response.json();
-    console.log(`${metric} 히스토리 데이터 수신:`, data.length, '항목');
-    return data;
+    console.log(`[fetchHistory] ${metric} 히스토리 데이터 수신:`, data.length, '항목');
+    
+    // 실제 데이터가 있으면 반환
+    if (data && Array.isArray(data) && data.length > 0) {
+      console.log(`[fetchHistory] ${metric} 실제 데이터 반환:`, data.slice(0, 3));
+      return data;
+    } else {
+      console.warn(`[fetchHistory] ${metric}: InfluxDB에 데이터가 없음`);
+      return []; // 빈 배열 반환 (더미 데이터 대신)
+    }
   } catch (error) {
-    console.error('기록 데이터 가져오기 오류:', error);
-    // 오류 시 더미 데이터 반환
-    return Array(5).fill().map((_, i) => ({
-      timestamp: new Date(Date.now() - i * 3600000).toISOString(),
-      value: Math.random() * 10 + 20
-    }));
+    console.error(`[fetchHistory] ${metric} 기록 데이터 가져오기 오류:`, error);
+    
+    // 네트워크 오류 등의 경우에만 빈 배열 반환
+    console.warn(`[fetchHistory] ${metric}: 네트워크 오류로 빈 데이터 반환`);
+    return []; // 더미 데이터 생성하지 않음
   }
 };
 

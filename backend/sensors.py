@@ -18,6 +18,15 @@ except ImportError:
     print("pyserial이 설치되지 않았습니다. 시뮬레이션 모드로만 동작합니다.")
     SERIAL_AVAILABLE = False
 
+# InfluxDB 연결 추가
+try:
+    from influx_storage import save_sensor_data
+    INFLUXDB_AVAILABLE = True
+    print("InfluxDB 모듈 연결 성공")
+except ImportError as e:
+    print(f"InfluxDB 모듈 연결 실패: {e}")
+    INFLUXDB_AVAILABLE = False
+
 class SensorDataManager:
     """센서 데이터를 관리하는 클래스 (실제 하드웨어 + 시뮬레이션 지원)"""
     
@@ -32,9 +41,10 @@ class SensorDataManager:
         # 기본 초기값 설정
         self.current_values = {
             "temperature": 23.5,  # 섭씨
-            "humidity": 58.0,     # 퍼센트 (아두이노에서 지원하지 않으면 계산값 사용)
-            "power": 135.0,       # 와트 (장치 상태로부터 계산)
+            "humidity": 58.0,     # 퍼센트 (DHT11/DHT22 센서)
+            "power": 135.0,       # 와트 (계산값 - 센서 없음)
             "soil": 42.0,         # 퍼센트
+            "co2": 420.0,         # ppm (CO2 센서)
         }
         
         # 제공된 초기값이 있으면 업데이트
@@ -63,7 +73,8 @@ class SensorDataManager:
             "temperature": [],
             "humidity": [],
             "power": [],
-            "soil": []
+            "soil": [],
+            "co2": []
         }
         
         # 아두이노 연결 시도
@@ -188,15 +199,18 @@ class SensorDataManager:
     def _parse_arduino_data(self, data_line):
         """아두이노에서 받은 데이터를 파싱합니다."""
         try:
-            # "온도: 25.0 °C, CO2: 350, 조도: 15, 토양 수분: 650" 형태의 데이터 파싱
+            # "온도: 25.0 °C, 습도: 60.5 %, CO2: 350, 조도: 15, 토양 수분: 650" 형태의 데이터 파싱
             with self.data_lock:
                 temp_match = re.search(r'온도:\s*([\d.]+)', data_line)
+                humidity_match = re.search(r'습도:\s*([\d.]+)', data_line)
                 co2_match = re.search(r'CO2:\s*(\d+)', data_line)
                 light_match = re.search(r'조도:\s*(\d+)', data_line)
                 soil_match = re.search(r'토양\s*수분:\s*(\d+)', data_line)
                 
                 if temp_match:
                     self.arduino_sensor_data['temperature'] = float(temp_match.group(1))
+                if humidity_match:
+                    self.arduino_sensor_data['humidity'] = float(humidity_match.group(1))
                 if co2_match:
                     self.arduino_sensor_data['co2'] = int(co2_match.group(1))
                 if light_match:
@@ -247,6 +261,10 @@ class SensorDataManager:
                 "timestamp": timestamp, 
                 "value": round(self.current_values["soil"] + np.random.uniform(-3, 3), 1)
             })
+            self.history["co2"].append({
+                "timestamp": timestamp, 
+                "value": round(self.current_values["co2"] + np.random.uniform(-20, 20), 1)
+            })
     
     def _calculate_power_consumption(self):
         """장치 상태를 기반으로 전력 소모량을 계산합니다."""
@@ -293,13 +311,16 @@ class SensorDataManager:
                 if 'temperature' in self.arduino_sensor_data:
                     self.current_values["temperature"] = self.arduino_sensor_data['temperature']
                 
+                if 'humidity' in self.arduino_sensor_data:
+                    self.current_values["humidity"] = self.arduino_sensor_data['humidity']
+                
                 if 'soil' in self.arduino_sensor_data:
                     self.current_values["soil"] = self.arduino_sensor_data['soil']
                 
-                # 습도는 계산값 사용 (또는 아두이노 DHT11에서 습도도 읽도록 수정 가능)
-                self.current_values["humidity"] = self._calculate_humidity()
+                if 'co2' in self.arduino_sensor_data:
+                    self.current_values["co2"] = self.arduino_sensor_data['co2']
                 
-                # 전력은 장치 상태로부터 계산
+                # 전력은 항상 계산값 사용 (센서 없음)
                 self.current_values["power"] = self._calculate_power_consumption()
         else:
             # 시뮬레이션 모드
@@ -307,24 +328,32 @@ class SensorDataManager:
             self.current_values["humidity"] = round(self.current_values["humidity"] + np.random.uniform(-1, 1), 1)
             self.current_values["power"] = round(self.current_values["power"] + np.random.uniform(-2, 2), 1)
             self.current_values["soil"] = round(self.current_values["soil"] + np.random.uniform(-0.5, 0.5), 1)
+            self.current_values["co2"] = round(self.current_values["co2"] + np.random.uniform(-10, 10), 1)
             
             # 장치 상태에 따른 값 변화 시뮬레이션
             if self.device_status["fan"]:
                 self.current_values["temperature"] -= 0.2
-                self.current_values["power"] += 5.0
+                self.current_values["co2"] -= 5  # 팬 동작시 CO2 감소
+                self.current_values["power"] += 5.0  # 팬 동작시 전력 증가
             
             if self.device_status["water"]:
                 self.current_values["soil"] += 0.5
-                self.current_values["power"] += 3.0
+                self.current_values["humidity"] += 1.0  # 급수시 습도 증가
+                self.current_values["power"] += 3.0  # 펌프 동작시 전력 증가
             
             if self.device_status["light"]:
                 self.current_values["temperature"] += 0.1
-                self.current_values["power"] += 10.0
+                self.current_values["co2"] -= 2  # 광합성으로 CO2 소모
+                self.current_values["power"] += 10.0  # LED 동작시 전력 증가
             
             if self.device_status["window"]:
                 external_humidity = 50 + np.random.uniform(-10, 10)
                 self.current_values["humidity"] = round(
                     0.9 * self.current_values["humidity"] + 0.1 * external_humidity, 1
+                )
+                # 창문 열림시 외부 공기로 CO2 조절
+                self.current_values["co2"] = round(
+                    0.8 * self.current_values["co2"] + 0.2 * 400, 1
                 )
         
         # 값 범위 제한
@@ -332,6 +361,22 @@ class SensorDataManager:
         self.current_values["humidity"] = max(min(self.current_values["humidity"], 100), 20)
         self.current_values["power"] = max(min(self.current_values["power"], 300), 50)
         self.current_values["soil"] = max(min(self.current_values["soil"], 100), 0)
+        self.current_values["co2"] = max(min(self.current_values["co2"], 2000), 300)
+        
+        # InfluxDB에 센서 데이터 저장
+        if INFLUXDB_AVAILABLE:
+            try:
+                # 장치 상태도 함께 저장
+                data_to_save = self.current_values.copy()
+                data_to_save.update({
+                    f"device_{device}": 1 if status else 0 
+                    for device, status in self.device_status.items()
+                })
+                data_to_save["mode"] = "hardware" if self.arduino_connected else "simulation"
+                
+                save_sensor_data(data_to_save)
+            except Exception as e:
+                print(f"InfluxDB 센서 데이터 저장 오류: {e}")
         
         return self.current_values
     

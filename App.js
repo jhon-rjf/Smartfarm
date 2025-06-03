@@ -24,7 +24,7 @@ import DeviceControl from './components/DeviceControl';
 import GraphBox from './components/GraphBox';
 import ElderlyScreen from './screens/ElderlyScreen';
 import { StatusBar } from 'expo-status-bar';
-import { getAutoMode, setAutoMode as setGlobalAutoMode, subscribeToAutoModeUpdates, initApiService } from './services/api';
+import { getAutoMode, setAutoMode as setGlobalAutoMode, subscribeToAutoModeUpdates, initApiService, fetchHistory } from './services/api';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -64,8 +64,11 @@ function FloatingButtons({ navigation }) {
 function HomeScreen({ navigation, userLocation }) {
   const [selectedMetric, setSelectedMetric] = useState('temperature');
   const [autoMode, setAutoMode] = useState(false);
+  const [chartData, setChartData] = useState({});
+  const [isLoadingChart, setIsLoadingChart] = useState(false);
 
-  const metricData = {
+  // 기본 더미 데이터 (API 실패시 사용)
+  const fallbackMetricData = {
     temperature: [22, 23, 24, 24, 25],
     humidity: [55, 58, 60, 59, 61],
     power: [130, 135, 140, 142, 144],
@@ -76,14 +79,63 @@ function HomeScreen({ navigation, userLocation }) {
   const metricTitles = {
     temperature: '🌡 온도 변화',
     humidity: '💧 습도 변화',
-    power: '⚡ 전력 사용량 변화',
+    power: '⚡ 전력 사용량 변화 (계산값)',
     soil: '🌱 토양 습도 변화',
     co2: '🟢 이산화탄소 농도 변화',
   };
 
-  const currentTemperature = metricData.temperature[metricData.temperature.length - 1];
-  const currentCo2 = metricData.co2[metricData.co2.length - 1];
-  const currentSoil = metricData.soil[metricData.soil.length - 1];
+  // 차트 데이터 로드 함수
+  const loadChartData = async (metric) => {
+    setIsLoadingChart(true);
+    try {
+      console.log(`[HomeScreen] ${metric} 차트 데이터 로딩 중...`);
+      const historyData = await fetchHistory(metric);
+      
+      console.log(`[HomeScreen] ${metric} 받은 데이터:`, historyData ? historyData.length : 0, '개');
+      
+      if (historyData && historyData.length > 0) {
+        // API에서 받은 실제 데이터를 차트 형식으로 변환
+        const chartValues = historyData.slice(-10).map(item => item.value); // 최근 10개 데이터
+        console.log(`[HomeScreen] ${metric} 변환된 차트 값들:`, chartValues);
+        
+        setChartData(prev => {
+          const newData = {
+            ...prev,
+            [metric]: chartValues
+          };
+          console.log(`[HomeScreen] ${metric} 차트 상태 업데이트:`, newData[metric]);
+          return newData;
+        });
+        
+        console.log(`[HomeScreen] ${metric} 실제 데이터 로드 완료:`, chartValues.length, '개 포인트');
+      } else {
+        // 데이터가 없으면 더미 데이터 사용
+        setChartData(prev => ({
+          ...prev,
+          [metric]: fallbackMetricData[metric]
+        }));
+        console.log(`[HomeScreen] ${metric} 더미 데이터 사용:`, fallbackMetricData[metric]);
+      }
+    } catch (error) {
+      console.error(`[HomeScreen] ${metric} 차트 데이터 로드 오러:`, error);
+      // 오류 시 더미 데이터 사용
+      setChartData(prev => ({
+        ...prev,
+        [metric]: fallbackMetricData[metric]
+      }));
+    } finally {
+      setIsLoadingChart(false);
+    }
+  };
+
+  // 현재 표시될 차트 데이터
+  const currentChartData = chartData[selectedMetric] || fallbackMetricData[selectedMetric];
+  console.log(`[HomeScreen] ${selectedMetric} 현재 차트 데이터:`, currentChartData);
+  
+  // 디바이스 제어용 현재 값들 (더미 데이터 유지)
+  const currentTemperature = fallbackMetricData.temperature[fallbackMetricData.temperature.length - 1];
+  const currentCo2 = fallbackMetricData.co2[fallbackMetricData.co2.length - 1];
+  const currentSoil = fallbackMetricData.soil[fallbackMetricData.soil.length - 1];
 
   useEffect(() => {
     (async () => {
@@ -104,6 +156,16 @@ function HomeScreen({ navigation, userLocation }) {
       unsubscribeAutoMode();
     };
   }, []);
+
+  // 선택된 메트릭이 변경될 때 차트 데이터 로드
+  useEffect(() => {
+    loadChartData(selectedMetric);
+  }, [selectedMetric]);
+
+  // 메트릭 선택 핸들러
+  const handleMetricSelect = async (metric) => {
+    setSelectedMetric(metric);
+  };
 
   const handleAutoMode = async () => {
     try {
@@ -128,7 +190,7 @@ function HomeScreen({ navigation, userLocation }) {
     >
       <ScrollView contentContainerStyle={styles.scrollContainer}>
         <Text style={styles.title}>🌿 Smart Greenhouse System 🌿</Text>
-        <StatusCards onCardPress={setSelectedMetric} />
+        <StatusCards onCardPress={handleMetricSelect} />
 
         <View style={styles.mainSectionWrapper}>
           <View style={styles.deviceControlWrapper}>
@@ -164,7 +226,9 @@ function HomeScreen({ navigation, userLocation }) {
           <View style={styles.graphSectionWrapper}>
             <GraphBox
               title={metricTitles[selectedMetric]}
-              data={metricData[selectedMetric]}
+              data={currentChartData}
+              isLoading={isLoadingChart}
+              onRefresh={() => loadChartData(selectedMetric)}
             />
           </View>
         </View>
