@@ -1,0 +1,61 @@
+{
+  "expo": {
+    "name": "MyApp",
+    "slug": "MyApp",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "jsEngine": "hermes"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      }
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-camera",
+      "expo-image-picker",
+      "expo-media-library",
+      "expo-location",
+      "expo-font",
+      "expo-av"
+    ]
+  },
+  "dependencies": {
+    "@react-navigation/bottom-tabs": "^7.3.13",
+    "@react-navigation/native": "^7.1.9",
+    "@react-navigation/stack": "^7.3.2",
+    "expo": "^53.0.9",
+    "expo-av": "~15.1.4",
+    "expo-camera": "~16.1.6",
+    "expo-font": "~13.3.1",
+    "expo-image-picker": "~16.1.4",
+    "expo-location": "~18.1.5",
+    "expo-media-library": "~17.1.6",
+    "expo-speech": "~13.1.7",
+    "expo-sqlite": "^15.2.10",
+    "expo-status-bar": "~2.2.3",
+    "react": "19.0.0",
+    "react-native-chart-kit": "^6.12.0",
+    "react-native-safe-area-context": "5.4.0",
+    "react-native-screens": "~4.10.0",
+    "react-native-svg": "15.11.2",
+    "socket.io-client": "^4.8.1",
+    "react-dom": "19.0.0",
+    "react-native-web": "^0.20.0",
+    "@expo/metro-runtime": "~5.0.4"
+  }
+}

@@ -1,0 +1,184 @@
+"""
+스마트 온실 시스템의 시계열 데이터베이스(InfluxDB) 연동 모듈
+대화 기록, 센서 데이터 등을 시계열 DB에 저장하고 조회하는 함수들 제공
+"""
+import os
+import time
+from datetime import datetime, timedelta
+from typing import Dict, List, Any, Optional
+from dotenv import load_dotenv
+
+try:
+    import influxdb_client
+    from influxdb_client.client.write_api import SYNCHRONOUS
+    from influxdb_client.client.exceptions import InfluxDBError
+    INFLUXDB_AVAILABLE = True
+except ImportError:
+    print("InfluxDB 클라이언트 라이브러리를 찾을 수 없습니다. in-memory 저장소를 사용합니다.")
+    INFLUXDB_AVAILABLE = False
+
+# 환경 변수 로드
+load_dotenv()
+
+# InfluxDB 설정
+INFLUXDB_URL = os.getenv("INFLUXDB_URL", "http://localhost:8086")
+INFLUXDB_TOKEN = os.getenv("INFLUXDB_TOKEN", "")
+INFLUXDB_ORG = os.getenv("INFLUXDB_ORG", "iotctd")
+INFLUXDB_BUCKET = os.getenv("INFLUXDB_BUCKET", "smart_greenhouse")
+
+# In-memory 저장소 (InfluxDB를 사용할 수 없는 경우 대체)
+chat_memory = {}
+chat_timestamps = {}
+CHAT_EXPIRY = 3600  # 1시간 (초 단위)
+
+# InfluxDB 클라이언트 초기화
+influx_client = None
+write_api = None
+query_api = None
+
+def init_influxdb():
+    """InfluxDB 연결 초기화"""
+    global influx_client, write_api, query_api, INFLUXDB_AVAILABLE
+    
+    if not INFLUXDB_AVAILABLE:
+        print("InfluxDB 라이브러리가 설치되지 않아 초기화를 건너뜁니다.")
+        return False
+    
+    if not INFLUXDB_TOKEN:
+        print("InfluxDB 토큰이 설정되지 않았습니다. in-memory 저장소를 사용합니다.")
+        INFLUXDB_AVAILABLE = False
+        return False
+    
+    try:
+        influx_client = influxdb_client.InfluxDBClient(
+            url=INFLUXDB_URL,
+            token=INFLUXDB_TOKEN,
+            org=INFLUXDB_ORG
+        )
+        
+        # API 클라이언트 초기화
+        write_api = influx_client.write_api(write_options=SYNCHRONOUS)
+        query_api = influx_client.query_api()
+        
+        # 연결 확인
+        health = influx_client.health()
+        if health.status == "pass":
+            print(f"InfluxDB 연결 성공: {INFLUXDB_URL}")
+            return True
+        else:
+            print(f"InfluxDB 상태 확인 실패: {health.message}")
+            INFLUXDB_AVAILABLE = False
+            return False
+            
+    except Exception as e:
+        print(f"InfluxDB 연결 실패: {str(e)}")
+        INFLUXDB_AVAILABLE = False
+        return False
+
+# 시작 시 InfluxDB 초기화 시도
+init_result = init_influxdb()
+
+def save_chat_message(session_id: str, message: Dict[str, Any]) -> bool:
+    """
+    대화 메시지를 저장합니다.
+    
+    Args:
+        session_id: 세션 ID
+        message: 저장할 메시지 (role, content 필드 포함)
+        
+    Returns:
+        성공 여부
+    """
+    timestamp = datetime.utcnow()
+    
+    # In-memory 저장소에 백업
+    if session_id not in chat_memory:
+        chat_memory[session_id] = []
+    chat_memory[session_id].append(message)
+    chat_timestamps[session_id] = time.time()
+    
+    # InfluxDB를 사용할 수 없는 경우 in-memory 저장만 수행
+    if not INFLUXDB_AVAILABLE or not influx_client:
+        return True
+    
+    try:
+        # InfluxDB에 데이터 저장
+        point = influxdb_client.Point("chat_messages") \
+            .tag("session_id", session_id) \
+            .tag("role", message.get("role", "unknown")) \
+            .field("content", message.get("content", "")) \
+            .time(timestamp)
+            
+        write_api.write(bucket=INFLUXDB_BUCKET, record=point)
+        return True
+    except Exception as e:
+        print(f"InfluxDB 메시지 저장 오류: {str(e)}")
+        return False
+
+def get_chat_history(session_id: str, hours: int = 1) -> List[Dict[str, Any]]:
+    """
+    지정된 세션의 대화 기록을 조회합니다.
+    
+    Args:
+        session_id: 세션 ID
+        hours: 몇 시간 전까지의 기록을 가져올지 (기본값: 1시간)
+        
+    Returns:
+        대화 기록 목록
+    """
+    # In-memory 저장소에서 조회
+    if session_id in chat_memory:
+        return chat_memory[session_id]
+    
+    # InfluxDB를 사용할 수 없는 경우 빈 목록 반환
+    if not INFLUXDB_AVAILABLE or not influx_client:
+        return []
+    
+    try:
+        # 지정된 시간 전부터의 기록 조회
+        start_time = datetime.utcnow() - timedelta(hours=hours)
+        
+        query = f'''
+        from(bucket: "{INFLUXDB_BUCKET}")
+            |> range(start: {start_time.isoformat()}Z)
+            |> filter(fn: (r) => r._measurement == "chat_messages")
+            |> filter(fn: (r) => r.session_id == "{session_id}")
+            |> sort(columns: ["_time"], desc: false)
+        '''
+        
+        result = query_api.query(query=query, org=INFLUXDB_ORG)
+        
+        messages = []
+        for table in result:
+            for record in table.records:
+                messages.append({
+                    "role": record.values.get("role", "unknown"),
+                    "content": record.values.get("_value", ""),
+                    "timestamp": record.values.get("_time")
+                })
+                
+        return messages
+    except Exception as e:
+        print(f"InfluxDB 메시지 조회 오류: {str(e)}")
+        # 오류 발생 시 메모리 저장소 반환
+        return chat_memory.get(session_id, [])
+
+def cleanup_expired_sessions():
+    """
+    만료된 세션을 정리합니다. (메모리 저장소만 해당)
+    """
+    current_time = time.time()
+    expired_sessions = []
+    
+    for session_id, last_access in chat_timestamps.items():
+        if current_time - last_access > CHAT_EXPIRY:
+            expired_sessions.append(session_id)
+    
+    for session_id in expired_sessions:
+        if session_id in chat_memory:
+            del chat_memory[session_id]
+        if session_id in chat_timestamps:
+            del chat_timestamps[session_id]
+    
+    if expired_sessions:
+        print(f"{len(expired_sessions)}개의 만료된 세션이 메모리에서 정리되었습니다.") 

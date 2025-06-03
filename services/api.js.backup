@@ -1,0 +1,711 @@
+/**
+ * 스마트 온실 시스템 API 서비스
+ */
+
+import { initDatabase, saveChatMessage, getAllChatMessages } from './database';
+
+const API_URL = 'http://gknu-comeng.kro.kr:5001';
+
+// API 요청 타임아웃 (5초)
+const API_TIMEOUT = 5000;
+
+// 동시 요청 제한
+let pendingRequests = 0;
+const MAX_CONCURRENT_REQUESTS = 5;
+let lastRequestTime = 0;
+const REQUEST_INTERVAL = 300; // 요청 간 최소 간격 (ms)
+
+// 구독자 관리를 위한 변수
+let statusUpdateSubscribers = [];
+
+// 자동모드 상태 관리
+let autoModeEnabled = false;
+let autoModeSubscribers = [];
+
+// 자동제어 설정 관리
+let autoControlSettings = {
+  // 조명 제어 (온도가 낮으면 켜기)
+  light: {
+    enabled: true,
+    sensor: 'temperature',
+    condition: 'below', // below, above
+    threshold: 20,
+    action: 'on' // on, off
+  },
+  // 환풍기 제어 (CO2가 높으면 켜기)
+  fan: {
+    enabled: true,
+    sensor: 'co2',
+    condition: 'above',
+    threshold: 450,
+    action: 'on'
+  },
+  // 물주기 제어 (토양습도가 낮으면 켜기)
+  water: {
+    enabled: true,
+    sensor: 'soil',
+    condition: 'below',
+    threshold: 40,
+    action: 'on'
+  },
+  // 창문 제어 (온도가 높으면 열기)
+  window: {
+    enabled: true,
+    sensor: 'temperature',
+    condition: 'above',
+    threshold: 25,
+    action: 'on'
+  }
+};
+let autoControlSettingsSubscribers = [];
+
+// 전역 채팅 세션 관리
+let globalChatSessionId = null;
+let chatSessionSubscribers = [];
+
+// 전역 채팅 로그 관리
+let globalChatLog = [];
+let chatLogSubscribers = [];
+let messageOrderCounter = 0; // 메시지 순서 관리
+
+/**
+ * 타임아웃이 있는 안전한 fetch 요청을 생성합니다
+ * @param {string} url - 요청 URL
+ * @param {object} options - fetch 옵션
+ * @param {number} timeout - 타임아웃 시간 (ms)
+ * @param {number} retries - 재시도 횟수
+ * @returns {Promise} fetch 결과 Promise
+ */
+async function safeFetch(url, options = {}, timeout = API_TIMEOUT, retries = 1) {
+  // 동시 요청 수 제한
+  if (pendingRequests >= MAX_CONCURRENT_REQUESTS) {
+    console.warn(`[safeFetch] 너무 많은 요청이 진행 중입니다 (${pendingRequests}). 잠시 대기합니다.`);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    if (pendingRequests >= MAX_CONCURRENT_REQUESTS) {
+      throw new Error('너무 많은 네트워크 요청이 진행 중입니다. 나중에 다시 시도해주세요.');
+    }
+  }
+  
+  // 요청 간격 제한
+  const now = Date.now();
+  if (now - lastRequestTime < REQUEST_INTERVAL) {
+    await new Promise(resolve => setTimeout(resolve, REQUEST_INTERVAL));
+  }
+  
+  // 요청 카운터 증가
+  pendingRequests++;
+  lastRequestTime = Date.now();
+  
+  let lastError = null;
+  
+  try {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+      
+      try {
+        console.log(`[safeFetch] 시도 ${attempt + 1}/${retries + 1}: ${url}`);
+        
+        const response = await fetch(url, {
+          ...options,
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        // 성공적인 응답이면 반환
+        return response;
+      } catch (error) {
+        clearTimeout(timeoutId);
+        lastError = error;
+        
+        if (error.name === 'AbortError') {
+          console.warn(`[safeFetch] 타임아웃 발생 (시도 ${attempt + 1}/${retries + 1})`);
+        } else {
+          console.error(`[safeFetch] 오류 발생 (시도 ${attempt + 1}/${retries + 1}):`, error.message);
+        }
+        
+        // 마지막 시도가 아니면 재시도 전 약간의 지연
+        if (attempt < retries) {
+          const delay = 1000 * (attempt + 1);
+          console.log(`[safeFetch] ${delay}ms 후 재시도...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+      }
+    }
+    
+    // 모든 시도가 실패한 경우
+    if (lastError.name === 'AbortError') {
+      throw new Error('요청 시간이 초과되었습니다. 네트워크 연결을 확인해주세요.');
+    }
+    
+    throw lastError;
+  } finally {
+    // 요청 카운터 감소
+    pendingRequests = Math.max(0, pendingRequests - 1);
+  }
+}
+
+/**
+ * 장치 상태 업데이트에 대한 구독 함수
+ * @param {Function} callback - 상태 변경 시 호출될 콜백 함수
+ * @returns {Function} 구독 취소 함수
+ */
+export const subscribeToStatusUpdates = (callback) => {
+  if (typeof callback !== 'function') {
+    console.warn('[subscribeToStatusUpdates] 유효하지 않은 콜백 함수입니다.');
+    return () => {};
+  }
+  
+  statusUpdateSubscribers.push(callback);
+  
+  // 구독 취소 함수 반환
+  return () => {
+    statusUpdateSubscribers = statusUpdateSubscribers.filter(cb => cb !== callback);
+  };
+};
+
+/**
+ * 모든 구독자에게 상태 변경 알림
+ * @param {Object} status - 최신 상태 데이터
+ */
+const notifyStatusUpdate = (status) => {
+  console.log(`[notifyStatusUpdate] ${statusUpdateSubscribers.length}명의 구독자에게 상태 업데이트 알림`);
+  console.log('[notifyStatusUpdate] 상태 데이터:', JSON.stringify(status.devices));
+  
+  statusUpdateSubscribers.forEach((callback, index) => {
+    try {
+      console.log(`[notifyStatusUpdate] 구독자 #${index+1} 호출 중...`);
+      callback(status);
+      console.log(`[notifyStatusUpdate] 구독자 #${index+1} 호출 성공`);
+    } catch (error) {
+      console.error(`[notifyStatusUpdate] 구독자 #${index+1} 호출 오류:`, error);
+    }
+  });
+};
+
+/**
+ * 현재 온실 상태 데이터를 가져옵니다.
+ */
+export const fetchStatus = async () => {
+  try {
+    console.log('[fetchStatus] 상태 데이터 요청 중...');
+    const response = await safeFetch(`${API_URL}/api/status`);
+    
+    if (!response.ok) {
+      throw new Error(`서버 응답 오류: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log('[fetchStatus] 상태 데이터 수신:', JSON.stringify(data.devices));
+    
+    // 구독자들에게 상태 업데이트 알림
+    notifyStatusUpdate(data);
+    
+    return data;
+  } catch (error) {
+    console.error('[fetchStatus] 상태 데이터 가져오기 오류:', error);
+    // 오류 시 더미 데이터 반환
+    const dummyData = {
+      temperature: 23.5,
+      humidity: 58.0,
+      power: 135.0,
+      soil: 42.0,
+      devices: {
+        fan: false,
+        water: false,
+        light: false,
+        window: false
+      },
+      timestamp: new Date().toISOString()
+    };
+    
+    return dummyData;
+  }
+};
+
+/**
+ * 특정 측정 항목의 기록 데이터를 가져옵니다.
+ * @param {string} metric - 측정 항목 (temperature, humidity, power, soil)
+ */
+export const fetchHistory = async (metric) => {
+  try {
+    console.log(`${metric} 히스토리 데이터 요청 중...`);
+    const response = await fetch(`${API_URL}/api/history?metric=${metric}`);
+    console.log('히스토리 응답 코드:', response.status);
+    
+    if (!response.ok) {
+      throw new Error(`서버 응답 오류: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    console.log(`${metric} 히스토리 데이터 수신:`, data.length, '항목');
+    return data;
+  } catch (error) {
+    console.error('기록 데이터 가져오기 오류:', error);
+    // 오류 시 더미 데이터 반환
+    return Array(5).fill().map((_, i) => ({
+      timestamp: new Date(Date.now() - i * 3600000).toISOString(),
+      value: Math.random() * 10 + 20
+    }));
+  }
+};
+
+/**
+ * 장치 제어 상태를 업데이트합니다.
+ * @param {string} device - 장치 이름 (fan, water, light, window)
+ * @param {boolean} status - 켜기/끄기 상태
+ */
+export const controlDevice = async (device, status) => {
+  console.log(`[controlDevice] 장치 제어 요청: ${device} => ${status}`);
+  
+  try {
+    // 입력 유효성 검사
+    if (!device || typeof status !== 'boolean') {
+      throw new Error('유효하지 않은 장치 또는 상태 값입니다');
+    }
+    
+    // 요청 데이터 구성
+    const requestData = {
+      device,
+      status
+    };
+    
+    console.log('[controlDevice] API 요청 데이터:', JSON.stringify(requestData));
+    
+    const response = await safeFetch(`${API_URL}/api/control`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestData),
+    });
+    
+    console.log('[controlDevice] 장치 제어 응답 코드:', response.status);
+    
+    if (!response.ok) {
+      let errorMessage = '서버 오류가 발생했습니다';
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.error || errorMessage;
+      } catch (e) {
+        // JSON 파싱 오류 무시
+      }
+      throw new Error(`서버 응답 오류: ${response.status}, ${errorMessage}`);
+    }
+    
+    const data = await response.json();
+    console.log('[controlDevice] 장치 제어 응답 데이터:', JSON.stringify(data.devices));
+    
+    // 장치 제어 성공 시 구독자에게 상태 업데이트 알림
+    if (data.success) {
+      console.log('[controlDevice] 제어 성공, 구독자들에게 상태 업데이트 알림 중...');
+      notifyStatusUpdate(data);
+    }
+    
+    return data;
+  } catch (error) {
+    console.error('[controlDevice] 장치 제어 오류:', error.message);
+    // 오류 응답 반환
+    return { 
+      success: false, 
+      error: error.message,
+      devices: {
+        fan: device === 'fan' ? status : false,
+        water: device === 'water' ? status : false,
+        light: device === 'light' ? status : false,
+        window: device === 'window' ? status : false
+      }
+    };
+  }
+};
+
+/**
+ * 챗봇에 메시지를 보내고 응답을 받습니다.
+ * @param {string} message - 사용자 메시지
+ * @param {string} sessionId - 대화 세션 ID (선택적)
+ * @param {string} location - 사용자 위치 정보 (선택적)
+ */
+export async function sendChatMessage(message, sessionId = null, location = '서울') {
+  try {
+    // 입력 유효성 검사
+    if (!message || typeof message !== 'string') {
+      throw new Error('유효하지 않은 메시지입니다');
+    }
+    
+    // 위치 정보 안전 처리
+    const safeLocation = location && typeof location === 'string' ? location : '서울';
+    
+    // 전역 세션 ID 사용 (파라미터로 받은 sessionId보다 우선)
+    const currentSessionId = globalChatSessionId || sessionId;
+    
+    console.log('API 서비스: 채팅 메시지 전송 시작', { 
+      messageLength: message.length,
+      hasSessionId: !!currentSessionId,
+      globalSessionId: globalChatSessionId,
+      paramSessionId: sessionId,
+      location: safeLocation
+    });
+    
+    // 요청 데이터 구성
+    const requestData = { 
+      message,
+      location: safeLocation 
+    };
+    
+    if (currentSessionId && typeof currentSessionId === 'string') {
+      requestData.session_id = currentSessionId;
+    }
+    
+    const response = await safeFetch(`${API_URL}/api/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestData),
+    });
+    
+    console.log('API 서비스: 채팅 응답 받음', { 
+      status: response.status, 
+      ok: response.ok
+    });
+    
+    if (!response.ok) {
+      let errorMessage = '서버 오류가 발생했습니다';
+      try {
+        const errorText = await response.text();
+        if (errorText) errorMessage = errorText;
+      } catch (e) {
+        // 텍스트 파싱 오류 무시
+      }
+      
+      throw new Error(`API 오류: ${response.status} - ${errorMessage || response.statusText}`);
+    }
+    
+    let data;
+    try {
+      data = await response.json();
+    } catch (jsonError) {
+      console.error('API 서비스: JSON 파싱 오류', jsonError);
+      throw new Error('응답 데이터 파싱 오류');
+    }
+    
+    // 새로운 세션 ID가 있으면 전역 세션 ID 업데이트
+    if (data.session_id && data.session_id !== globalChatSessionId) {
+      console.log(`[sendChatMessage] 새로운 세션 ID 수신: ${data.session_id}`);
+      setGlobalChatSessionId(data.session_id);
+    }
+    
+    return data;
+  } catch (error) {
+    console.error('API 서비스: 채팅 요청 예외 발생', {
+      name: error.name,
+      message: error.message
+    });
+    throw error;
+  }
+}
+
+/**
+ * 자동모드 상태 설정
+ * @param {boolean} enabled - 자동모드 활성화 여부
+ */
+export const setAutoMode = (enabled) => {
+  autoModeEnabled = enabled;
+  console.log(`[setAutoMode] 자동모드 ${enabled ? '활성화' : '비활성화'}`);
+  
+  // 구독자들에게 자동모드 상태 변경 알림
+  autoModeSubscribers.forEach((callback, index) => {
+    try {
+      callback(enabled);
+    } catch (error) {
+      console.error(`[setAutoMode] 구독자 #${index+1} 호출 오류:`, error);
+    }
+  });
+};
+
+/**
+ * 자동모드 상태 조회
+ * @returns {boolean} 자동모드 활성화 여부
+ */
+export const getAutoMode = () => {
+  return autoModeEnabled;
+};
+
+/**
+ * 자동모드 상태 변경 구독
+ * @param {Function} callback - 자동모드 상태 변경 시 호출될 콜백 함수
+ * @returns {Function} 구독 취소 함수
+ */
+export const subscribeToAutoModeUpdates = (callback) => {
+  if (typeof callback !== 'function') {
+    console.warn('[subscribeToAutoModeUpdates] 유효하지 않은 콜백 함수입니다.');
+    return () => {};
+  }
+  
+  autoModeSubscribers.push(callback);
+  
+  // 현재 상태를 즉시 전달
+  callback(autoModeEnabled);
+  
+  // 구독 취소 함수 반환
+  return () => {
+    autoModeSubscribers = autoModeSubscribers.filter(cb => cb !== callback);
+  };
+};
+
+/**
+ * 자동제어 설정 업데이트
+ * @param {Object} newSettings - 새로운 설정
+ */
+export const updateAutoControlSettings = (newSettings) => {
+  autoControlSettings = { ...autoControlSettings, ...newSettings };
+  console.log(`[updateAutoControlSettings] 설정 업데이트:`, autoControlSettings);
+  
+  // 구독자들에게 설정 변경 알림
+  autoControlSettingsSubscribers.forEach((callback, index) => {
+    try {
+      callback(autoControlSettings);
+    } catch (error) {
+      console.error(`[updateAutoControlSettings] 구독자 #${index+1} 호출 오류:`, error);
+    }
+  });
+};
+
+/**
+ * 자동제어 설정 조회
+ * @returns {Object} 현재 자동제어 설정
+ */
+export const getAutoControlSettings = () => {
+  return { ...autoControlSettings };
+};
+
+/**
+ * 자동제어 설정 변경 구독
+ * @param {Function} callback - 설정 변경 시 호출될 콜백 함수
+ * @returns {Function} 구독 취소 함수
+ */
+export const subscribeToAutoControlSettings = (callback) => {
+  if (typeof callback !== 'function') {
+    console.warn('[subscribeToAutoControlSettings] 유효하지 않은 콜백 함수입니다.');
+    return () => {};
+  }
+  
+  autoControlSettingsSubscribers.push(callback);
+  
+  // 현재 설정을 즉시 전달
+  callback(autoControlSettings);
+  
+  // 구독 취소 함수 반환
+  return () => {
+    autoControlSettingsSubscribers = autoControlSettingsSubscribers.filter(cb => cb !== callback);
+  };
+};
+
+/**
+ * 전역 채팅 세션 ID 설정
+ * @param {string} sessionId - 새로운 세션 ID
+ */
+export const setGlobalChatSessionId = (sessionId) => {
+  console.log(`[setGlobalChatSessionId] 세션 ID 변경: ${globalChatSessionId} => ${sessionId}`);
+  globalChatSessionId = sessionId;
+  
+  // 구독자들에게 세션 ID 변경 알림
+  chatSessionSubscribers.forEach((callback, index) => {
+    try {
+      callback(sessionId);
+    } catch (error) {
+      console.error(`[setGlobalChatSessionId] 구독자 #${index+1} 호출 오류:`, error);
+    }
+  });
+};
+
+/**
+ * 전역 채팅 세션 ID 조회
+ * @returns {string|null} 현재 세션 ID
+ */
+export const getGlobalChatSessionId = () => {
+  console.log(`[getGlobalChatSessionId] 현재 세션 ID: ${globalChatSessionId}`);
+  return globalChatSessionId;
+};
+
+/**
+ * 채팅 세션 ID 변경 구독
+ * @param {Function} callback - 세션 ID 변경 시 호출될 콜백 함수
+ * @returns {Function} 구독 취소 함수
+ */
+export const subscribeToChatSession = (callback) => {
+  if (typeof callback !== 'function') {
+    console.warn('[subscribeToChatSession] 유효하지 않은 콜백 함수입니다.');
+    return () => {};
+  }
+  
+  chatSessionSubscribers.push(callback);
+  
+  // 현재 세션 ID를 즉시 전달
+  callback(globalChatSessionId);
+  
+  // 구독 취소 함수 반환
+  return () => {
+    chatSessionSubscribers = chatSessionSubscribers.filter(cb => cb !== callback);
+  };
+};
+
+/**
+ * 전역 채팅 로그에 메시지 추가
+ * @param {Object} message - 추가할 메시지 객체
+ */
+export const addMessageToGlobalChatLog = async (message) => {
+  console.log('[addMessageToGlobalChatLog] 메시지 추가:', message);
+  
+  // 메시지 순서 증가
+  messageOrderCounter++;
+  
+  // 메모리에 추가
+  globalChatLog = [...globalChatLog, message];
+  
+  // SQLite에 저장
+  try {
+    await saveChatMessage(message, globalChatSessionId, messageOrderCounter);
+    console.log('[addMessageToGlobalChatLog] SQLite 저장 완료');
+  } catch (error) {
+    console.error('[addMessageToGlobalChatLog] SQLite 저장 오류:', error);
+  }
+  
+  // 구독자들에게 채팅 로그 변경 알림
+  chatLogSubscribers.forEach((callback, index) => {
+    try {
+      callback([...globalChatLog]);
+    } catch (error) {
+      console.error(`[addMessageToGlobalChatLog] 구독자 #${index+1} 호출 오류:`, error);
+    }
+  });
+};
+
+/**
+ * 전역 채팅 로그 초기화
+ * @param {Array} initialLog - 초기 채팅 로그 (선택적)
+ */
+export const setGlobalChatLog = async (initialLog = []) => {
+  console.log('[setGlobalChatLog] 채팅 로그 초기화:', initialLog.length, '개 메시지');
+  globalChatLog = [...initialLog];
+  
+  // 메시지 순서 카운터 업데이트
+  if (initialLog.length > 0) {
+    messageOrderCounter = initialLog.length;
+  }
+  
+  // SQLite에도 저장 (초기 메시지인 경우)
+  if (initialLog.length > 0) {
+    try {
+      for (let i = 0; i < initialLog.length; i++) {
+        await saveChatMessage(initialLog[i], globalChatSessionId, i + 1);
+      }
+      console.log('[setGlobalChatLog] SQLite 초기 데이터 저장 완료');
+    } catch (error) {
+      console.error('[setGlobalChatLog] SQLite 저장 오류:', error);
+    }
+  }
+  
+  // 구독자들에게 채팅 로그 변경 알림
+  chatLogSubscribers.forEach((callback, index) => {
+    try {
+      callback([...globalChatLog]);
+    } catch (error) {
+      console.error(`[setGlobalChatLog] 구독자 #${index+1} 호출 오류:`, error);
+    }
+  });
+};
+
+/**
+ * SQLite에서 채팅 로그 로드
+ */
+export const loadChatLogFromDatabase = async () => {
+  try {
+    console.log('[loadChatLogFromDatabase] SQLite에서 채팅 로그 로드 시작...');
+    
+    const messages = await getAllChatMessages();
+    
+    if (messages.length > 0) {
+      console.log('[loadChatLogFromDatabase] 로드된 메시지:', messages.length, '개');
+      
+      // 전역 채팅 로그 설정 (SQLite 저장은 생략)
+      globalChatLog = messages;
+      messageOrderCounter = messages.length;
+      
+      // 구독자들에게 채팅 로그 변경 알림
+      chatLogSubscribers.forEach((callback, index) => {
+        try {
+          callback([...globalChatLog]);
+        } catch (error) {
+          console.error(`[loadChatLogFromDatabase] 구독자 #${index+1} 호출 오류:`, error);
+        }
+      });
+      
+      return messages;
+    } else {
+      console.log('[loadChatLogFromDatabase] 저장된 메시지가 없습니다.');
+      return [];
+    }
+  } catch (error) {
+    console.error('[loadChatLogFromDatabase] 채팅 로그 로드 오류:', error);
+    return [];
+  }
+};
+
+/**
+ * 전역 채팅 로그 조회
+ * @returns {Array} 현재 채팅 로그
+ */
+export const getGlobalChatLog = () => {
+  console.log('[getGlobalChatLog] 현재 채팅 로그:', globalChatLog.length, '개 메시지');
+  return [...globalChatLog];
+};
+
+/**
+ * 채팅 로그 변경 구독
+ * @param {Function} callback - 채팅 로그 변경 시 호출될 콜백 함수
+ * @returns {Function} 구독 취소 함수
+ */
+export const subscribeToChatLog = (callback) => {
+  if (typeof callback !== 'function') {
+    console.warn('[subscribeToChatLog] 유효하지 않은 콜백 함수입니다.');
+    return () => {};
+  }
+  
+  chatLogSubscribers.push(callback);
+  
+  // 현재 채팅 로그를 즉시 전달
+  callback([...globalChatLog]);
+  
+  // 구독 취소 함수 반환
+  return () => {
+    chatLogSubscribers = chatLogSubscribers.filter(cb => cb !== callback);
+  };
+};
+
+/**
+ * API 서비스 초기화
+ */
+export const initApiService = async () => {
+  try {
+    console.log('[initApiService] API 서비스 초기화 시작...');
+    
+    // SQLite 데이터베이스 초기화
+    const dbInitSuccess = await initDatabase();
+    if (!dbInitSuccess) {
+      console.error('[initApiService] 데이터베이스 초기화 실패');
+      return false;
+    }
+    
+    // 기존 채팅 로그 로드
+    await loadChatLogFromDatabase();
+    
+    console.log('[initApiService] API 서비스 초기화 완료');
+    return true;
+  } catch (error) {
+    console.error('[initApiService] API 서비스 초기화 오류:', error);
+    return false;
+  }
+}; 

@@ -1,0 +1,49 @@
+{
+  "name": "MyApp",
+  "displayName": "Smart Greenhouse",
+  "expo": {
+    "name": "MyApp",
+    "slug": "MyApp",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "jsEngine": "hermes",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "이 앱은 사용자 위치 정보를 사용하여 날씨 데이터를 제공합니다.",
+        "NSCameraUsageDescription": "이 앱은 카메라를 사용하여 사진을 찍고 분석합니다.",
+        "NSPhotoLibraryUsageDescription": "이 앱은 갤러리에서 사진을 선택하기 위해 사진 라이브러리에 접근합니다."
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#ffffff"
+      },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "CAMERA",
+        "READ_EXTERNAL_STORAGE",
+        "WRITE_EXTERNAL_STORAGE"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-font",
+      "expo-location",
+      "expo-camera",
+      "expo-media-library",
+      "expo-image-picker"
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+flask==3.0.0
+flask-cors==4.0.0
+requests==2.31.0
+python-dotenv==1.0.0
+pillow==10.2.0
+numpy==1.26.3
+influxdb-client==1.40.0
+urllib3==2.0.7
+certifi==2024.2.2
+PyYAML==6.0.1
+flask-socketio==5.3.6
+google-generativeai==0.3.2
+sounddevice==0.4.6
+websockets==12.0
+gunicorn==21.2.0
+pyserial==3.5
