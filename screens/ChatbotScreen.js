@@ -17,24 +17,7 @@ import {
 import * as ImagePicker from 'expo-image-picker';
 import { sendChatMessage, analyzeImage, controlDevice, fetchStatus, subscribeToChatSession, getGlobalChatSessionId, subscribeToChatLog, addMessageToGlobalChatLog, getGlobalChatLog, setGlobalChatLog } from '../services/api';
 
-// 명령어 인식을 위한 패턴
-const COMMAND_PATTERNS = {
-  // 불/조명 제어 (더 유연한 패턴)
-  LIGHT_ON: /(불|조명|전등|라이트)\s*(켜|켜줘|켜주세요|켜주실래요|켜줄래요|턴온|turn on)|켜.*?(불|조명|전등|라이트)/i,
-  LIGHT_OFF: /(불|조명|전등|라이트)\s*(꺼|꺼줘|꺼주세요|꺼주실래요|꺼줄래요|턴오프|turn off)|꺼.*?(불|조명|전등|라이트)|불꺼|조명꺼|전등꺼/i,
-  
-  // 팬 제어
-  FAN_ON: /(팬|선풍기|환풍기)\s*(켜|켜줘|켜주세요|켜주실래요|켜줄래요|턴온|turn on)|켜.*?(팬|선풍기|환풍기)/i,
-  FAN_OFF: /(팬|선풍기|환풍기)\s*(꺼|꺼줘|꺼주세요|꺼주실래요|꺼줄래요|턴오프|turn off)|꺼.*?(팬|선풍기|환풍기)|팬꺼/i,
-    
-  // 물/펌프 제어
-  WATER_ON: /(물|펌프|워터펌프|급수)\s*(켜|켜줘|켜주세요|켜주실래요|켜줄래요|턴온|turn on|공급|공급해줘|공급해주세요)|켜.*?(물|펌프)|공급.*?(물|펌프)/i,
-  WATER_OFF: /(물|펌프|워터펌프|급수)\s*(꺼|꺼줘|꺼주세요|꺼주실래요|꺼줄래요|턴오프|turn off|중단|중단해줘|중단해주세요)|꺼.*?(물|펌프)|중단.*?(물|펌프)|물꺼|펌프꺼/i,
-  
-  // 창문 제어
-  WINDOW_OPEN: /(창문|윈도우)\s*(열어|열어줘|열어주세요|열어주실래요|열어줄래요|오픈|open)|열어.*?(창문|윈도우)|창문열어/i,
-  WINDOW_CLOSE: /(창문|윈도우)\s*(닫아|닫아줘|닫아주세요|닫아주실래요|닫아줄래요|클로즈|close)|닫아.*?(창문|윈도우)|창문닫아/i,
-};
+// 모든 명령어는 Gemini API를 통해 자연어 처리됩니다
 
 export default function ChatbotScreen({ navigation, userLocation = '서울' }) {
   const [chatInput, setChatInput] = useState('');
@@ -109,7 +92,7 @@ export default function ChatbotScreen({ navigation, userLocation = '서울' }) {
       // 전역 채팅 로그가 비어있을 때만 초기 메시지 설정
       const currentGlobalChatLog = getGlobalChatLog();
       if (currentGlobalChatLog.length === 0) {
-        let initialMessage = `안녕하세요! 스마트 온실 도우미입니다. 무엇을 도와드릴까요?\n\n불 켜줘, 팬 꺼줘 등의 명령으로 기기를 제어할 수 있습니다.`;
+        let initialMessage = `안녕하세요! 스마트 온실 도우미입니다. 무엇을 도와드릴까요?\n\n자연스러운 대화로 기기를 제어하고 온실 관리에 대한 조언을 받을 수 있습니다. 예: "불 켜줘", "습도가 너무 높은데 어떻게 해야 할까?"`;
         
         // 위치 정보가 있으면 추가
         if (userLocation && userLocation !== '서울') {
@@ -202,169 +185,7 @@ export default function ChatbotScreen({ navigation, userLocation = '서울' }) {
     );
   };
   
-  // 장치 제어 명령 인식 및 처리
-  const processDeviceCommand = async (message) => {
-    console.log('[processDeviceCommand] 장치 명령 인식 시도:', message);
-    console.log('[processDeviceCommand] 메시지 길이:', message.length);
-    console.log('[processDeviceCommand] 메시지 타입:', typeof message);
-    
-    let commandDetected = false;
-    let responseText = '';
-    let controlSuccess = false;
-    
-    // 모든 패턴 테스트 결과 출력
-    console.log('[processDeviceCommand] 패턴 테스트 결과:');
-    console.log('  - LIGHT_ON:', COMMAND_PATTERNS.LIGHT_ON.test(message));
-    console.log('  - LIGHT_OFF:', COMMAND_PATTERNS.LIGHT_OFF.test(message));
-    console.log('  - FAN_ON:', COMMAND_PATTERNS.FAN_ON.test(message));
-    console.log('  - FAN_OFF:', COMMAND_PATTERNS.FAN_OFF.test(message));
-    console.log('  - WATER_ON:', COMMAND_PATTERNS.WATER_ON.test(message));
-    console.log('  - WATER_OFF:', COMMAND_PATTERNS.WATER_OFF.test(message));
-    console.log('  - WINDOW_OPEN:', COMMAND_PATTERNS.WINDOW_OPEN.test(message));
-    console.log('  - WINDOW_CLOSE:', COMMAND_PATTERNS.WINDOW_CLOSE.test(message));
-    
-    // 조명 켜기 명령
-    if (COMMAND_PATTERNS.LIGHT_ON.test(message)) {
-      console.log('조명 켜기 명령 감지됨');
-      commandDetected = true;
-      try {
-        const response = await controlDevice('light', true);
-        console.log('조명 켜기 응답:', response);
-        if (response.success) {
-          responseText = '네, 조명을 켰습니다. 💡✨';
-          // 기기 상태 업데이트
-          setDeviceStatus(response.devices);
-          controlSuccess = true;
-        } else {
-          responseText = '조명을 켜는데 문제가 발생했습니다. 다시 시도해주세요.';
-        }
-      } catch (error) {
-        console.error('조명 제어 중 오류:', error);
-        responseText = '조명 제어 중 오류가 발생했습니다.';
-      }
-    }
-    
-    // 조명 끄기
-    else if (COMMAND_PATTERNS.LIGHT_OFF.test(message)) {
-      commandDetected = true;
-      try {
-        const response = await controlDevice('light', false);
-        if (response.success) {
-          responseText = '네, 조명을 껐습니다. 💡🔅';
-          setDeviceStatus(response.devices);
-          controlSuccess = true;
-        } else {
-          responseText = '조명을 끄는데 문제가 발생했습니다. 다시 시도해주세요.';
-        }
-      } catch (error) {
-        responseText = '조명 제어 중 오류가 발생했습니다.';
-      }
-    }
-    
-    // 팬 켜기
-    else if (COMMAND_PATTERNS.FAN_ON.test(message)) {
-      commandDetected = true;
-      try {
-        const response = await controlDevice('fan', true);
-        if (response.success) {
-          responseText = '네, 팬을 켰습니다. 🌀💨';
-          setDeviceStatus(response.devices);
-          controlSuccess = true;
-        } else {
-          responseText = '팬을 켜는데 문제가 발생했습니다. 다시 시도해주세요.';
-        }
-      } catch (error) {
-        responseText = '팬 제어 중 오류가 발생했습니다.';
-      }
-    }
-    
-    // 팬 끄기
-    else if (COMMAND_PATTERNS.FAN_OFF.test(message)) {
-      commandDetected = true;
-      try {
-        const response = await controlDevice('fan', false);
-        if (response.success) {
-          responseText = '네, 팬을 껐습니다. 🌀🔅';
-          setDeviceStatus(response.devices);
-          controlSuccess = true;
-        } else {
-          responseText = '팬을 끄는데 문제가 발생했습니다. 다시 시도해주세요.';
-        }
-      } catch (error) {
-        responseText = '팬 제어 중 오류가 발생했습니다.';
-      }
-    }
-    
-    // 물 공급 켜기
-    else if (COMMAND_PATTERNS.WATER_ON.test(message)) {
-      commandDetected = true;
-      try {
-        const response = await controlDevice('water', true);
-        if (response.success) {
-          responseText = '네, 물 공급을 시작했습니다. 💧💦';
-          setDeviceStatus(response.devices);
-          controlSuccess = true;
-        } else {
-          responseText = '물 공급을 시작하는데 문제가 발생했습니다. 다시 시도해주세요.';
-        }
-      } catch (error) {
-        responseText = '물 공급 제어 중 오류가 발생했습니다.';
-      }
-    }
-    
-    // 물 공급 끄기
-    else if (COMMAND_PATTERNS.WATER_OFF.test(message)) {
-      commandDetected = true;
-      try {
-        const response = await controlDevice('water', false);
-        if (response.success) {
-          responseText = '네, 물 공급을 중단했습니다. 💧🔅';
-          setDeviceStatus(response.devices);
-          controlSuccess = true;
-        } else {
-          responseText = '물 공급을 중단하는데 문제가 발생했습니다. 다시 시도해주세요.';
-        }
-      } catch (error) {
-        responseText = '물 공급 제어 중 오류가 발생했습니다.';
-      }
-    }
-    
-    // 창문 열기
-    else if (COMMAND_PATTERNS.WINDOW_OPEN.test(message)) {
-      commandDetected = true;
-      try {
-        const response = await controlDevice('window', true);
-        if (response.success) {
-          responseText = '네, 창문을 열었습니다. 🪟✨';
-          setDeviceStatus(response.devices);
-          controlSuccess = true;
-        } else {
-          responseText = '창문을 여는데 문제가 발생했습니다. 다시 시도해주세요.';
-        }
-      } catch (error) {
-        responseText = '창문 제어 중 오류가 발생했습니다.';
-      }
-    }
-    
-    // 창문 닫기
-    else if (COMMAND_PATTERNS.WINDOW_CLOSE.test(message)) {
-      commandDetected = true;
-      try {
-        const response = await controlDevice('window', false);
-        if (response.success) {
-          responseText = '네, 창문을 닫았습니다. 🪟🔅';
-          setDeviceStatus(response.devices);
-          controlSuccess = true;
-        } else {
-          responseText = '창문을 닫는데 문제가 발생했습니다. 다시 시도해주세요.';
-        }
-      } catch (error) {
-        responseText = '창문 제어 중 오류가 발생했습니다.';
-      }
-    }
-    
-    return { commandDetected, responseText, controlSuccess };
-  };
+
 
   // 이미지 분석 처리 함수
   const handleImageAnalysis = async () => {
@@ -432,20 +253,7 @@ export default function ChatbotScreen({ navigation, userLocation = '서울' }) {
       // 사용자 메시지 추가
       await addMessageToGlobalChatLog({ role: 'user', text: input });
       
-      // 로컬 명령어 처리 시도
-      console.log('[handleSend] 로컬 명령어 처리 시도:', input);
-      const { commandDetected, responseText, controlSuccess } = await processDeviceCommand(input);
-      console.log('[handleSend] 명령어 처리 결과:', { commandDetected, responseText, controlSuccess });
-      
-      // 로컬 명령어가 감지되고 성공적으로 처리된 경우
-      if (commandDetected) {
-        console.log('[handleSend] 로컬 명령어 감지됨, 응답 반환');
-        await addMessageToGlobalChatLog({ role: 'bot', text: responseText });
-        setIsLoading(false);
-        return;
-      } else {
-        console.log('[handleSend] 로컬 명령어 감지되지 않음, API 서버로 전송');
-      }
+      // 모든 메시지를 Gemini API로 전송하여 자연어 처리
       
       // API 서버에 메시지 전송
       try {

@@ -37,14 +37,6 @@ LogBox.ignoreLogs([
 function FloatingButtons({ navigation }) {
   return (
     <>
-      {/* 오른쪽 상단 큰 노인맞춤 버튼 */}
-      <TouchableOpacity
-        style={styles.elderlyButton}
-        onPress={() => navigation.navigate('ElderlyScreen')}
-      >
-        <Text style={styles.elderlyButtonText}>👵 노인맞춤</Text>
-      </TouchableOpacity>
-
       {/* 오른쪽 하단 챗봇 버튼 */}
       <TouchableOpacity
         style={[styles.fab, { bottom: 30, right: 30 }]}
@@ -400,25 +392,7 @@ const styles = StyleSheet.create({
     height: 50,
     borderRadius: 25,
   },
-  elderlyButton: {
-    position: 'absolute',
-    top: 40,
-    right: 20,
-    paddingVertical: 10,
-    paddingHorizontal: 15,
-    backgroundColor: '#f0a500',
-    borderRadius: 10,
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 4,
-  },
-  elderlyButtonText: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
+
   autoModeControls: {
     flexDirection: 'row',
     justifyContent: 'space-between',

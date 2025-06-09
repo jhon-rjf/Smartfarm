@@ -8,7 +8,6 @@ export default function DeviceControl({ currentTemperature, currentCo2, currentS
     water: false,
     light: false,
     window: false,
-    lightSensor: false,
   });
 
   const [autoMode, setAutoMode] = useState(false);
@@ -203,14 +202,7 @@ export default function DeviceControl({ currentTemperature, currentCo2, currentS
         </Text>
       </TouchableOpacity>
 
-      <TouchableOpacity
-        style={styles.controlButton}
-        onPress={() => handleControl('lightSensor', !devices.lightSensor)}
-      >
-        <Text style={styles.controlButtonText}>
-          🌞 {devices.lightSensor ? '조도센서 끄기' : '조도센서 켜기'}
-        </Text>
-      </TouchableOpacity>
+
     </View>
   );
 }
