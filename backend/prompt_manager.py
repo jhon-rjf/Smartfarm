@@ -70,23 +70,25 @@ class PromptManager:
                            humidity: float, 
                            soil: float, 
                            power: float,
+                           co2: float,
                            device_status: Dict[str, bool],
                            user_location: str = "서울",
                            current_time: str = None,
                            conversation_text: str = "",
                            user_message: str = "") -> str:
         """
-        챗봇용 종합 프롬프트를 구성합니다.
+        챗봇 프롬프트를 동적으로 구성합니다.
         
         Args:
-            temperature: 온도 값
-            humidity: 습도 값
-            soil: 토양 습도 값
-            power: 전력 사용량 값
+            temperature: 현재 온도
+            humidity: 현재 습도
+            soil: 현재 토양 습도
+            power: 현재 전력 사용량
+            co2: 현재 CO2 농도
             device_status: 장치 상태 딕셔너리
             user_location: 사용자 위치
             current_time: 현재 시간
-            conversation_text: 이전 대화 내역
+            conversation_text: 이전 대화 내용
             user_message: 사용자 메시지
         
         Returns:
@@ -113,7 +115,8 @@ class PromptManager:
                 temperature=temperature,
                 humidity=humidity,
                 soil=soil,
-                power=power
+                power=power,
+                co2=co2
             )
             components.append(greenhouse_info)
         
@@ -284,6 +287,7 @@ if __name__ == "__main__":
         humidity=60.0,
         soil=45.0,
         power=120.0,
+        co2=400.0,
         device_status={'fan': False, 'light': True, 'water': False, 'window': False},
         user_message="불 켜줘"
     )

@@ -17,6 +17,8 @@ action_tags:
   water_off: "[ACTION_WATER_OFF]"
   window_open: "[ACTION_WINDOW_OPEN]"
   window_close: "[ACTION_WINDOW_CLOSE]"
+  weather_request: "[WEATHER_REQUEST]"
+  history_request: "[HISTORY_REQUEST:{timestamp}:{metric}]"
 
 # 챗봇 프롬프트
 chatbot_prompts:
@@ -51,6 +53,18 @@ chatbot_prompts:
        - 물 공급 중단: [ACTION_WATER_OFF]
        - 창문 열기: [ACTION_WINDOW_OPEN]
        - 창문 닫기: [ACTION_WINDOW_CLOSE]
+    
+    2. 사용자가 외부 날씨 정보를 요청할 경우 다음 태그를 포함하세요:
+       - 외부 날씨, 서울 날씨, 오늘 날씨 등: [WEATHER_REQUEST]
+    
+    3. 사용자가 과거 시간의 센서 데이터를 요청할 경우 다음 태그를 포함하세요:
+       - 과거 데이터 요청: [HISTORY_REQUEST:YYYY-MM-DD_HH:MM:SS:metric]
+       - 예시: "3시간전 온도" → [HISTORY_REQUEST:2024-01-15_14:30:00:temperature]
+       - 예시: "어제 이시간 습도" → [HISTORY_REQUEST:2024-01-14_17:30:00:humidity]  
+       - 예시: "오전 10시 토양습도" → [HISTORY_REQUEST:2024-01-15_10:00:00:soil]
+       - 사용 가능한 metric: temperature, humidity, soil, co2, power
+    
+    4. 온실 내부 현재 상태(온도, 습도, 토양습도, CO2, 전력)는 현재 제공된 데이터로 응답하세요.
 
   # Few-shot 학습 예시
   examples:
@@ -64,6 +78,12 @@ chatbot_prompts:
       bot: "네, 급수를 시작합니다. [ACTION_WATER_ON]"
     - user: "창문 열어줘"
       bot: "네, 창문을 열었습니다. [ACTION_WINDOW_OPEN]"
+    - user: "3시간전 기온이 어때?"
+      bot: "3시간 전 온도를 확인해드리겠습니다. [HISTORY_REQUEST:2024-01-15_14:30:00:temperature]"
+    - user: "어제 이시간 습도는?"
+      bot: "어제 이 시간 습도를 조회해드리겠습니다. [HISTORY_REQUEST:2024-01-14_17:30:00:humidity]"
+    - user: "오전 10시 토양습도는?"
+      bot: "오늘 오전 10시 토양습도를 확인해드리겠습니다. [HISTORY_REQUEST:2024-01-15_10:00:00:soil]"
 
   # 추가 응답 지침
   detailed_guidelines: |
@@ -104,6 +124,7 @@ context_templates:
     - 온도: {temperature}°C
     - 습도: {humidity}%
     - 토양 습도: {soil}%
+    - CO2 농도: {co2} ppm
     - 전력 사용량: {power}W
 
   # 장치 상태 템플릿

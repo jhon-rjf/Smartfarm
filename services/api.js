@@ -693,6 +693,72 @@ export const subscribeToChatLog = (callback) => {
 };
 
 /**
+ * 이미지를 분석하고 결과를 반환합니다.
+ * @param {string} imageUri - 분석할 이미지의 URI
+ * @param {string} prompt - 분석 프롬프트
+ * @returns {Promise<Object>} 분석 결과 객체
+ */
+export const analyzeImage = async (imageUri, prompt = '') => {
+  try {
+    console.log('[analyzeImage] 이미지 분석 요청 중...');
+    console.log('[analyzeImage] 이미지 URI:', imageUri);
+    console.log('[analyzeImage] 프롬프트:', prompt);
+    
+    // FormData 생성
+    const formData = new FormData();
+    
+    // 이미지 파일 추가 (React Native 형식)
+    formData.append('image', {
+      uri: imageUri,
+      type: 'image/jpeg',
+      name: 'plant_image.jpg',
+    });
+    
+    // 프롬프트 추가
+    if (prompt) {
+      formData.append('prompt', prompt);
+    }
+    
+    console.log('[analyzeImage] FormData 생성 완료');
+    
+    // React Native에서는 Content-Type을 명시적으로 설정하지 않음
+    const response = await fetch(`${API_URL}/api/analyze-image`, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        // React Native에서는 multipart/form-data의 Content-Type을 자동으로 설정
+        // 수동으로 설정하면 오히려 문제가 발생할 수 있음
+      },
+    });
+    
+    console.log('[analyzeImage] 응답 상태:', response.status);
+    
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[analyzeImage] 서버 오류 응답:', errorText);
+      throw new Error(`이미지 분석 요청 실패: ${response.status} - ${errorText}`);
+    }
+    
+    const data = await response.json();
+    console.log('[analyzeImage] 이미지 분석 완료:', data);
+    
+    return data;
+  } catch (error) {
+    console.error('[analyzeImage] 이미지 분석 오류:', error);
+    console.error('[analyzeImage] 오류 상세:', error.message);
+    
+    // 사용자에게 더 친화적인 오류 메시지 반환
+    if (error.message.includes('Network request failed')) {
+      throw new Error('네트워크 연결을 확인해주세요. 서버에 연결할 수 없습니다.');
+    } else if (error.message.includes('timeout')) {
+      throw new Error('요청 시간이 초과되었습니다. 다시 시도해주세요.');
+    } else {
+      throw error;
+    }
+  }
+};
+
+/**
  * API 서비스 초기화
  */
 export const initApiService = async () => {

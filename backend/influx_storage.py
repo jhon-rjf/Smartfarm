@@ -2,7 +2,7 @@
 InfluxDB 시계열 데이터베이스 연결 모듈
 """
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 from influxdb_client.client.write_api import SYNCHRONOUS
 import logging
@@ -140,6 +140,129 @@ class InfluxDBManager:
             logger.error(f"채팅 히스토리 조회 실패: {e}")
             return []
     
+    def get_historical_sensor_data(self, target_time, metric, tolerance_minutes=30):
+        """특정 시간대의 센서 데이터를 조회합니다.
+        
+        Args:
+            target_time (datetime): 조회할 목표 시간 (한국시간 기준)
+            metric (str): 조회할 센서 메트릭 (temperature, humidity, soil, co2, power)
+            tolerance_minutes (int): 허용 오차 시간 (분)
+        
+        Returns:
+            dict: 조회 결과 {'success': bool, 'data': value, 'actual_time': datetime, 'message': str}
+        """
+        if not self.query_api:
+            logger.warning("InfluxDB 연결 없음 - 과거 데이터 조회 불가")
+            return {
+                'success': False,
+                'data': None,
+                'actual_time': None,
+                'message': 'InfluxDB 연결이 없습니다.'
+            }
+        
+        try:
+            # 한국시간(UTC+9)을 UTC로 변환 - timezone 정보 추가
+            if target_time.tzinfo is None:
+                # timezone-naive인 경우 한국시간으로 가정
+                korea_tz = timezone(timedelta(hours=9))
+                target_time_korea = target_time.replace(tzinfo=korea_tz)
+            else:
+                target_time_korea = target_time
+            
+            # UTC로 변환
+            target_time_utc = target_time_korea.astimezone(timezone.utc)
+            
+            # 목표 시간 주변의 데이터 범위 설정 (UTC 기준)
+            start_time = target_time_utc - timedelta(minutes=tolerance_minutes)
+            end_time = target_time_utc + timedelta(minutes=tolerance_minutes)
+            
+            logger.info(f"한국시간 {target_time.strftime('%Y-%m-%d %H:%M:%S')} → UTC {target_time_utc.strftime('%Y-%m-%d %H:%M:%S')}")
+            
+            # InfluxDB 쿼리 구성
+            query = f'''
+            from(bucket: "{INFLUXDB_BUCKET}")
+                |> range(start: {start_time.strftime("%Y-%m-%dT%H:%M:%SZ")}, 
+                         stop: {end_time.strftime("%Y-%m-%dT%H:%M:%SZ")})
+                |> filter(fn: (r) => r._measurement == "sensor_data")
+                |> filter(fn: (r) => r.metric == "{metric}")
+                |> filter(fn: (r) => r.mode == "hardware")
+                |> filter(fn: (r) => r._field == "value")
+                |> sort(columns: ["_time"])
+            '''
+            
+            result = self.query_api.query(org=INFLUXDB_ORG, query=query)
+            
+            # 결과 처리
+            records = []
+            for table in result:
+                for record in table.records:
+                    # UTC 시간을 한국시간으로 변환
+                    utc_time = record.get_time()  # timezone-aware UTC
+                    korea_tz = timezone(timedelta(hours=9))
+                    korea_time = utc_time.astimezone(korea_tz)
+                    # timezone-naive로 변환 (기존 target_time과 호환)
+                    korea_time_naive = korea_time.replace(tzinfo=None)
+                    
+                    records.append({
+                        'time': korea_time_naive,
+                        'value': record.get_value()
+                    })
+            
+            if not records:
+                return {
+                    'success': False,
+                    'data': None,
+                    'actual_time': None,
+                    'message': f'{target_time.strftime("%Y-%m-%d %H:%M")} 시점의 {metric} 데이터를 찾을 수 없습니다.'
+                }
+            
+            # 목표 시간에 가장 가까운 데이터 찾기 (한국시간 기준, timezone-naive)
+            target_time_naive = target_time.replace(tzinfo=None) if target_time.tzinfo else target_time
+            closest_record = min(records, key=lambda x: abs((x['time'] - target_time_naive).total_seconds()))
+            
+            # 시간 차이 계산 (분 단위)
+            time_diff_minutes = abs((closest_record['time'] - target_time_naive).total_seconds()) / 60
+            
+            # 메트릭 이름을 한국어로 변환
+            metric_names = {
+                'temperature': '온도',
+                'humidity': '습도', 
+                'soil': '토양습도',
+                'co2': 'CO2',
+                'power': '전력사용량'
+            }
+            metric_korean = metric_names.get(metric, metric)
+            
+            # 단위 설정
+            units = {
+                'temperature': '°C',
+                'humidity': '%',
+                'soil': '%', 
+                'co2': 'ppm',
+                'power': 'W'
+            }
+            unit = units.get(metric, '')
+            
+            logger.info(f"과거 데이터 조회 성공: {metric} = {closest_record['value']}{unit} "
+                       f"({closest_record['time'].strftime('%Y-%m-%d %H:%M:%S')} 한국시간)")
+            
+            return {
+                'success': True,
+                'data': closest_record['value'],
+                'actual_time': closest_record['time'],
+                'message': f'{closest_record["time"].strftime("%Y년 %m월 %d일 %H시 %M분")} 시점의 '
+                          f'{metric_korean}는 {closest_record["value"]}{unit}였습니다.'
+            }
+            
+        except Exception as e:
+            logger.error(f"과거 센서 데이터 조회 실패: {e}")
+            return {
+                'success': False,
+                'data': None,
+                'actual_time': None,
+                'message': f'데이터 조회 중 오류가 발생했습니다: {str(e)}'
+            }
+    
     def cleanup_expired_sessions(self):
         """만료된 세션 데이터 정리"""
         try:
@@ -162,3 +285,7 @@ def cleanup_expired_sessions():
 
 def save_sensor_data(sensor_data):
     return influx_manager.save_sensor_data(sensor_data)
+
+def get_historical_sensor_data(target_time, metric, tolerance_minutes=30):
+    """특정 시간대의 센서 데이터를 조회합니다."""
+    return influx_manager.get_historical_sensor_data(target_time, metric, tolerance_minutes)

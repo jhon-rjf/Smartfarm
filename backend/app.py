@@ -13,6 +13,7 @@ import random
 import requests
 import threading
 import asyncio
+import re
 
 # 커스텀 모듈 임포트
 from sensors import simulator
@@ -218,21 +219,7 @@ def chat():
         print(f"대화 기록 로드 오류: {str(e)}")
         conversation_text = ""
     
-    # 날씨 정보 요청 확인
-    weather_keywords = ['날씨', '기온', '온도', '비', '눈', '구름', '맑음', '흐림']
-    if any(keyword in actual_user_message for keyword in weather_keywords):
-        try:
-            print(f"날씨 정보 요청 감지: {actual_user_message}")
-            weather_data = weather_api.get_current_weather(user_location)
-            
-            if weather_data["success"]:
-                weather_message = weather_api.format_current_weather_message(weather_data)
-                return jsonify({"response": weather_message, "session_id": session_id})
-        except Exception as weather_error:
-            print(f"날씨 정보 처리 오류: {str(weather_error)}")
-            # 날씨 정보 실패 시 계속 진행하여 일반 AI 응답 처리
-    
-    # 로컬 응답 처리 없이 항상 Gemini API 호출
+    # 모든 메시지를 Gemini API로 전달 (AI가 판단)
     print("모든 메시지를 Gemini API로 전달")
     
     # PromptManager를 사용하여 고급 프롬프트 구성
@@ -287,6 +274,73 @@ def chat():
             
         print(f"응답 길이: {len(text_response)} 문자")
         print(f"응답 내용 미리보기: {text_response[:100]}...")
+        
+        # WEATHER_REQUEST 태그 확인 및 처리
+        if "[WEATHER_REQUEST]" in text_response:
+            try:
+                print(f"날씨 정보 요청 태그 감지: {actual_user_message}")
+                weather_data = weather_api.get_current_weather(user_location)
+                
+                if weather_data["success"]:
+                    weather_message = weather_api.format_current_weather_message(weather_data)
+                    # 기존 응답에서 태그 제거하고 날씨 정보 추가
+                    final_response = text_response.replace("[WEATHER_REQUEST]", "").strip()
+                    final_response += f"\n\n{weather_message}"
+                    text_response = final_response
+                    print(f"날씨 정보 추가 완료")
+                else:
+                    # 날씨 정보 가져오기 실패시 태그만 제거
+                    text_response = text_response.replace("[WEATHER_REQUEST]", "").strip()
+                    print(f"날씨 정보 가져오기 실패: {weather_data.get('error', '알 수 없는 오류')}")
+            except Exception as weather_error:
+                print(f"날씨 정보 처리 오류: {str(weather_error)}")
+                # 오류 시 태그만 제거
+                text_response = text_response.replace("[WEATHER_REQUEST]", "").strip()
+        
+        # HISTORY_REQUEST 태그 확인 및 처리
+        history_pattern = r'\[HISTORY_REQUEST:([^:]+):([^]]+)\]'
+        history_matches = re.findall(history_pattern, text_response)
+        
+        if history_matches:
+            try:
+                print(f"과거 데이터 요청 태그 감지: {len(history_matches)}개")
+                
+                for timestamp_str, metric in history_matches:
+                    print(f"요청된 과거 데이터: {timestamp_str} - {metric}")
+                    
+                    # 타임스탬프 파싱
+                    try:
+                        target_time = datetime.strptime(timestamp_str, "%Y-%m-%d_%H:%M:%S")
+                        
+                        # InfluxDB에서 과거 데이터 조회
+                        historical_data = influx_storage.get_historical_sensor_data(
+                            target_time=target_time,
+                            metric=metric,
+                            tolerance_minutes=30
+                        )
+                        
+                        # 태그를 결과로 교체
+                        tag_to_replace = f"[HISTORY_REQUEST:{timestamp_str}:{metric}]"
+                        
+                        if historical_data['success']:
+                            replacement_text = historical_data['message']
+                            print(f"과거 데이터 조회 성공: {replacement_text}")
+                        else:
+                            replacement_text = historical_data['message']
+                            print(f"과거 데이터 조회 실패: {replacement_text}")
+                        
+                        text_response = text_response.replace(tag_to_replace, replacement_text)
+                        
+                    except ValueError as parse_error:
+                        print(f"시간 파싱 오류: {timestamp_str} - {str(parse_error)}")
+                        tag_to_replace = f"[HISTORY_REQUEST:{timestamp_str}:{metric}]"
+                        error_message = f"시간 형식을 인식할 수 없습니다: {timestamp_str}"
+                        text_response = text_response.replace(tag_to_replace, error_message)
+                        
+            except Exception as history_error:
+                print(f"과거 데이터 처리 오류: {str(history_error)}")
+                # 오류 시 모든 HISTORY_REQUEST 태그 제거
+                text_response = re.sub(history_pattern, "데이터 조회 중 오류가 발생했습니다.", text_response)
         
         # 봇 응답 저장 (InfluxDB)
         bot_msg = {"role": "bot", "content": text_response}

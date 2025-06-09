@@ -19,21 +19,21 @@ import { sendChatMessage, analyzeImage, controlDevice, fetchStatus, subscribeToC
 
 // 명령어 인식을 위한 패턴
 const COMMAND_PATTERNS = {
-  // 불/조명 제어
-  LIGHT_ON: /(불|조명|전등|라이트)[\s]*(켜|켜줘|켜주세요|켜주실래요|켜줄래요|턴온|turn on)/i,
-  LIGHT_OFF: /(불|조명|전등|라이트)[\s]*(꺼|꺼줘|꺼주세요|꺼주실래요|꺼줄래요|턴오프|turn off)/i,
+  // 불/조명 제어 (더 유연한 패턴)
+  LIGHT_ON: /(불|조명|전등|라이트)\s*(켜|켜줘|켜주세요|켜주실래요|켜줄래요|턴온|turn on)|켜.*?(불|조명|전등|라이트)/i,
+  LIGHT_OFF: /(불|조명|전등|라이트)\s*(꺼|꺼줘|꺼주세요|꺼주실래요|꺼줄래요|턴오프|turn off)|꺼.*?(불|조명|전등|라이트)|불꺼|조명꺼|전등꺼/i,
   
   // 팬 제어
-  FAN_ON: /(팬|선풍기|환풍기)[\s]*(켜|켜줘|켜주세요|켜주실래요|켜줄래요|턴온|turn on)/i,
-  FAN_OFF: /(팬|선풍기|환풍기)[\s]*(꺼|꺼줘|꺼주세요|꺼주실래요|꺼줄래요|턴오프|turn off)/i,
+  FAN_ON: /(팬|선풍기|환풍기)\s*(켜|켜줘|켜주세요|켜주실래요|켜줄래요|턴온|turn on)|켜.*?(팬|선풍기|환풍기)/i,
+  FAN_OFF: /(팬|선풍기|환풍기)\s*(꺼|꺼줘|꺼주세요|꺼주실래요|꺼줄래요|턴오프|turn off)|꺼.*?(팬|선풍기|환풍기)|팬꺼/i,
     
   // 물/펌프 제어
-  WATER_ON: /(물|펌프|워터펌프|급수)[\s]*(켜|켜줘|켜주세요|켜주실래요|켜줄래요|턴온|turn on|공급|공급해줘|공급해주세요)/i,
-  WATER_OFF: /(물|펌프|워터펌프|급수)[\s]*(꺼|꺼줘|꺼주세요|꺼주실래요|꺼줄래요|턴오프|turn off|중단|중단해줘|중단해주세요)/i,
+  WATER_ON: /(물|펌프|워터펌프|급수)\s*(켜|켜줘|켜주세요|켜주실래요|켜줄래요|턴온|turn on|공급|공급해줘|공급해주세요)|켜.*?(물|펌프)|공급.*?(물|펌프)/i,
+  WATER_OFF: /(물|펌프|워터펌프|급수)\s*(꺼|꺼줘|꺼주세요|꺼주실래요|꺼줄래요|턴오프|turn off|중단|중단해줘|중단해주세요)|꺼.*?(물|펌프)|중단.*?(물|펌프)|물꺼|펌프꺼/i,
   
   // 창문 제어
-  WINDOW_OPEN: /(창문|윈도우)[\s]*(열어|열어줘|열어주세요|열어주실래요|열어줄래요|오픈|open)/i,
-  WINDOW_CLOSE: /(창문|윈도우)[\s]*(닫아|닫아줘|닫아주세요|닫아주실래요|닫아줄래요|클로즈|close)/i,
+  WINDOW_OPEN: /(창문|윈도우)\s*(열어|열어줘|열어주세요|열어주실래요|열어줄래요|오픈|open)|열어.*?(창문|윈도우)|창문열어/i,
+  WINDOW_CLOSE: /(창문|윈도우)\s*(닫아|닫아줘|닫아주세요|닫아주실래요|닫아줄래요|클로즈|close)|닫아.*?(창문|윈도우)|창문닫아/i,
 };
 
 export default function ChatbotScreen({ navigation, userLocation = '서울' }) {
@@ -204,10 +204,24 @@ export default function ChatbotScreen({ navigation, userLocation = '서울' }) {
   
   // 장치 제어 명령 인식 및 처리
   const processDeviceCommand = async (message) => {
-    console.log('장치 명령 인식 시도:', message);
+    console.log('[processDeviceCommand] 장치 명령 인식 시도:', message);
+    console.log('[processDeviceCommand] 메시지 길이:', message.length);
+    console.log('[processDeviceCommand] 메시지 타입:', typeof message);
+    
     let commandDetected = false;
     let responseText = '';
     let controlSuccess = false;
+    
+    // 모든 패턴 테스트 결과 출력
+    console.log('[processDeviceCommand] 패턴 테스트 결과:');
+    console.log('  - LIGHT_ON:', COMMAND_PATTERNS.LIGHT_ON.test(message));
+    console.log('  - LIGHT_OFF:', COMMAND_PATTERNS.LIGHT_OFF.test(message));
+    console.log('  - FAN_ON:', COMMAND_PATTERNS.FAN_ON.test(message));
+    console.log('  - FAN_OFF:', COMMAND_PATTERNS.FAN_OFF.test(message));
+    console.log('  - WATER_ON:', COMMAND_PATTERNS.WATER_ON.test(message));
+    console.log('  - WATER_OFF:', COMMAND_PATTERNS.WATER_OFF.test(message));
+    console.log('  - WINDOW_OPEN:', COMMAND_PATTERNS.WINDOW_OPEN.test(message));
+    console.log('  - WINDOW_CLOSE:', COMMAND_PATTERNS.WINDOW_CLOSE.test(message));
     
     // 조명 켜기 명령
     if (COMMAND_PATTERNS.LIGHT_ON.test(message)) {
@@ -419,13 +433,18 @@ export default function ChatbotScreen({ navigation, userLocation = '서울' }) {
       await addMessageToGlobalChatLog({ role: 'user', text: input });
       
       // 로컬 명령어 처리 시도
+      console.log('[handleSend] 로컬 명령어 처리 시도:', input);
       const { commandDetected, responseText, controlSuccess } = await processDeviceCommand(input);
+      console.log('[handleSend] 명령어 처리 결과:', { commandDetected, responseText, controlSuccess });
       
       // 로컬 명령어가 감지되고 성공적으로 처리된 경우
       if (commandDetected) {
+        console.log('[handleSend] 로컬 명령어 감지됨, 응답 반환');
         await addMessageToGlobalChatLog({ role: 'bot', text: responseText });
         setIsLoading(false);
         return;
+      } else {
+        console.log('[handleSend] 로컬 명령어 감지되지 않음, API 서버로 전송');
       }
       
       // API 서버에 메시지 전송
