@@ -16,8 +16,8 @@ export default function StatusCards({ onCardPress }) {
   useEffect(() => {
     loadStatusData();
 
-    // 주기적으로 상태 업데이트 (30초마다)
-    const interval = setInterval(loadStatusData, 30000);
+    // 1초마다 상태 업데이트 (거의 실시간)
+    const interval = setInterval(loadStatusData, 1000);
 
     return () => clearInterval(interval);
   }, []);

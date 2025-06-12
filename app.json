@@ -39,11 +39,17 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-font",
-      "expo-location",
       "expo-camera",
+      "expo-image-picker",
       "expo-media-library",
-      "expo-image-picker"
-    ]
+      "expo-location",
+      "expo-font",
+      "expo-av"
+    ],
+    "extra": {
+      "apiUrl": "http://192.168.0.7:5001",
+      "enableAutoDiscovery": true,
+      "serverDiscoveryTimeout": 10000
+    }
   }
 }

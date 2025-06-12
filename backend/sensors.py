@@ -387,7 +387,7 @@ class SensorDataManager:
         self.current_values["humidity"] = max(min(self.current_values["humidity"], 100), 20)
         self.current_values["power"] = max(min(self.current_values["power"], 300), 50)
         self.current_values["soil"] = max(min(self.current_values["soil"], 100), 0)
-        self.current_values["co2"] = max(min(self.current_values["co2"], 2000), 300)
+        self.current_values["co2"] = max(min(self.current_values["co2"], 2000), 200)  # CO2 최소값을 200ppm으로 수정
         self.current_values["light"] = max(min(self.current_values["light"], 1000), 1)  # 실제 센서 범위 1-1000으로 조정
         
         # InfluxDB에 센서 데이터 저장

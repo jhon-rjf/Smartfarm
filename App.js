@@ -171,8 +171,8 @@ function HomeScreen({ navigation, userLocation }) {
     // 초기 센서 데이터 로드
     loadCurrentSensorData();
 
-    // 주기적으로 센서 데이터 업데이트 (30초마다)
-    const sensorInterval = setInterval(loadCurrentSensorData, 30000);
+    // 1초마다 센서 데이터 업데이트 (거의 실시간)
+    const sensorInterval = setInterval(loadCurrentSensorData, 1000);
 
     // 자동모드 상태 실시간 구독
     const unsubscribeAutoMode = subscribeToAutoModeUpdates((enabled) => {

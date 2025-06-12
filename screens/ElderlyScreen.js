@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,23 +8,55 @@ import {
   Alert,
   ImageBackground,
 } from 'react-native';
+import { fetchStatus } from '../services/api';
 
 export default function ElderlyScreen({ navigation, route }) {
+  // 실시간 센서 데이터 상태 추가
+  const [latestValues, setLatestValues] = useState({
+    temperature: 25,
+    humidity: 61,
+    power: 144,
+    soil: 46,
+    co2: 410,
+    light: 50,
+  });
+
+  // 더미 히스토리 데이터 (그래프용)
   const [metricData] = useState({
     temperature: [22, 23, 24, 24, 25],
     humidity: [55, 58, 60, 59, 61],
     power: [130, 135, 140, 142, 144],
     soil: [40, 42, 45, 44, 46],
     co2: [400, 420, 430, 415, 410],
+    light: [45, 48, 52, 50, 50],
   });
 
-  const latestValues = {
-    temperature: metricData.temperature[metricData.temperature.length - 1],
-    humidity: metricData.humidity[metricData.humidity.length - 1],
-    power: metricData.power[metricData.power.length - 1],
-    soil: metricData.soil[metricData.soil.length - 1],
-    co2: metricData.co2[metricData.co2.length - 1],
-  };
+  // 실시간 센서 데이터 로드 (1초마다)
+  useEffect(() => {
+    const loadSensorData = async () => {
+      try {
+        const data = await fetchStatus();
+        setLatestValues({
+          temperature: data.temperature || 25,
+          humidity: data.humidity || 61,
+          power: data.power || 144,
+          soil: data.soil || 46,
+          co2: data.co2 || 410,
+          light: data.light || 50,
+        });
+      } catch (error) {
+        console.error('어르신 모드 센서 데이터 로드 오류:', error);
+      }
+    };
+
+    // 초기 로드
+    loadSensorData();
+
+    // 1초마다 업데이트 (거의 실시간)
+    const interval = setInterval(loadSensorData, 1000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   const metricTitles = {
     temperature: '🌡 온도',

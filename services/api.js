@@ -4,7 +4,153 @@
 
 import { initDatabase, saveChatMessage, getAllChatMessages } from './database';
 
-const API_URL = 'http://192.168.0.7:5001';
+// 환경별 API URL 설정
+const getApiUrl = () => {
+  // 개발 환경에서는 환경 변수 확인
+  if (__DEV__) {
+    // 개발자가 직접 설정 가능 - 임시로 고정 URL 사용
+    const MANUAL_API_URL = 'http://192.168.0.7:5001'; // 현재 작동하는 IP로 고정
+    if (MANUAL_API_URL) {
+      console.log('[API] 수동 설정된 API URL 사용:', MANUAL_API_URL);
+      return MANUAL_API_URL;
+    }
+  }
+  
+  // 프로덕션 환경에서는 상대 경로 또는 도메인 사용
+  if (process.env.NODE_ENV === 'production') {
+    return process.env.EXPO_PUBLIC_API_URL || 'http://greenhouse.local:5001';
+  }
+  
+  // 기본값 (로컬 개발)
+  return process.env.EXPO_PUBLIC_API_URL || 'http://192.168.0.7:5001';
+};
+
+const API_URL = getApiUrl();
+console.log('[API] 사용 중인 API URL:', API_URL);
+
+// 서버 자동 발견 시스템
+let discoveredApiUrl = null;
+let isDiscovering = false;
+
+/**
+ * 로컬 네트워크에서 온실 서버를 자동으로 찾습니다
+ */
+const discoverServer = async () => {
+  if (isDiscovering) return discoveredApiUrl;
+  
+  isDiscovering = true;
+  console.log('[API] 서버 자동 발견 시작...');
+  
+  // 일반적인 로컬 IP 대역들
+  const commonSubnets = [
+    '192.168.1',   // 가장 일반적
+    '192.168.0',   // 현재 사용 중  
+    '192.168.2',
+    '10.0.0',      // 일부 라우터
+    '172.16.0'     // 기업 환경
+  ];
+  
+  // mDNS 스타일 호스트명들
+  const possibleHosts = [
+    'greenhouse.local',
+    'raspberry.local', 
+    'raspberrypi.local'
+  ];
+  
+  const testUrls = [];
+  
+  // 호스트명 기반 URL들 추가
+  possibleHosts.forEach(host => {
+    testUrls.push(`http://${host}:5001`);
+  });
+  
+  // IP 기반 URL들 추가 (각 대역의 .1~.50만 테스트)
+  commonSubnets.forEach(subnet => {
+    for (let i = 1; i <= 50; i++) {
+      testUrls.push(`http://${subnet}.${i}:5001`);
+    }
+  });
+  
+  console.log(`[API] ${testUrls.length}개 주소를 테스트합니다...`);
+  
+  // 병렬로 여러 주소 테스트 (최대 10개씩)
+  const batchSize = 10;
+  for (let i = 0; i < testUrls.length; i += batchSize) {
+    const batch = testUrls.slice(i, i + batchSize);
+    
+    const results = await Promise.allSettled(
+      batch.map(async (url) => {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 1000); // 1초 타임아웃
+          
+          const response = await fetch(`${url}/api/status`, {
+            signal: controller.signal,
+            method: 'GET'
+          });
+          
+          clearTimeout(timeoutId);
+          
+          if (response.ok) {
+            const data = await response.json();
+            // 온실 서버인지 확인 (temperature 등 센서 데이터가 있는지)
+            if (data.temperature !== undefined && data.humidity !== undefined) {
+              console.log(`[API] 서버 발견! ${url}`);
+              return url;
+            }
+          }
+        } catch (error) {
+          // 타임아웃이나 연결 실패는 정상 (발견 과정)
+        }
+        return null;
+      })
+    );
+    
+    // 성공한 첫 번째 결과 사용
+    const successful = results.find(result => 
+      result.status === 'fulfilled' && result.value !== null
+    );
+    
+    if (successful) {
+      discoveredApiUrl = successful.value;
+      isDiscovering = false;
+      console.log(`[API] 서버 자동 발견 완료: ${discoveredApiUrl}`);
+      return discoveredApiUrl;
+    }
+  }
+  
+  isDiscovering = false;
+  console.log('[API] 서버를 찾을 수 없습니다. 기본 URL 사용');
+  return null;
+};
+
+/**
+ * 현재 사용할 API URL을 반환합니다 (자동 발견 포함)
+ */
+const getCurrentApiUrl = async () => {
+  // 이미 발견된 서버가 있으면 사용
+  if (discoveredApiUrl) {
+    return discoveredApiUrl;
+  }
+  
+  // 설정된 URL이 작동하는지 확인
+  try {
+    const response = await fetch(`${API_URL}/api/status`, { 
+      method: 'GET',
+      timeout: 2000 
+    });
+    if (response.ok) {
+      console.log('[API] 설정된 URL이 정상 작동 중:', API_URL);
+      return API_URL;
+    }
+  } catch (error) {
+    console.log('[API] 설정된 URL 연결 실패, 자동 발견 시도...');
+  }
+  
+  // 자동 발견 시도
+  const discovered = await discoverServer();
+  return discovered || API_URL; // 발견 실패 시 기본 URL 사용
+};
 
 // API 요청 타임아웃 (5초)
 const API_TIMEOUT = 5000;
@@ -70,13 +216,20 @@ let messageOrderCounter = 0; // 메시지 순서 관리
 
 /**
  * 타임아웃이 있는 안전한 fetch 요청을 생성합니다
- * @param {string} url - 요청 URL
+ * @param {string} url - 요청 URL (상대 경로 가능)
  * @param {object} options - fetch 옵션
  * @param {number} timeout - 타임아웃 시간 (ms)
  * @param {number} retries - 재시도 횟수
  * @returns {Promise} fetch 결과 Promise
  */
 async function safeFetch(url, options = {}, timeout = API_TIMEOUT, retries = 1) {
+  // URL이 상대 경로인 경우 동적 API URL과 결합
+  let fullUrl = url;
+  if (!url.startsWith('http')) {
+    // 임시로 자동 발견 시스템 비활성화하고 고정 API_URL 사용
+    fullUrl = `${API_URL}${url.startsWith('/') ? url : '/' + url}`;
+  }
+
   // 동시 요청 수 제한
   if (pendingRequests >= MAX_CONCURRENT_REQUESTS) {
     console.warn(`[safeFetch] 너무 많은 요청이 진행 중입니다 (${pendingRequests}). 잠시 대기합니다.`);
@@ -105,9 +258,9 @@ async function safeFetch(url, options = {}, timeout = API_TIMEOUT, retries = 1) 
       const timeoutId = setTimeout(() => controller.abort(), timeout);
       
       try {
-        console.log(`[safeFetch] 시도 ${attempt + 1}/${retries + 1}: ${url}`);
+        console.log(`[safeFetch] 시도 ${attempt + 1}/${retries + 1}: ${fullUrl}`);
         
-        const response = await fetch(url, {
+        const response = await fetch(fullUrl, {
           ...options,
           signal: controller.signal
         });
@@ -126,6 +279,17 @@ async function safeFetch(url, options = {}, timeout = API_TIMEOUT, retries = 1) 
           console.error(`[safeFetch] 오류 발생 (시도 ${attempt + 1}/${retries + 1}):`, error.message);
         }
         
+        // 연결 실패 시 서버 재발견 시도 (첫 번째 시도에서만)
+        if (attempt === 0 && (error.name === 'AbortError' || error.message.includes('Network'))) {
+          console.log('[safeFetch] 연결 실패, 서버 재발견 시도...');
+          discoveredApiUrl = null; // 캐시된 URL 초기화
+          const newApiUrl = await getCurrentApiUrl();
+          if (newApiUrl !== fullUrl.split('/api')[0]) {
+            fullUrl = fullUrl.replace(/^https?:\/\/[^\/]+/, newApiUrl);
+            console.log(`[safeFetch] 새로운 서버 URL 사용: ${fullUrl}`);
+          }
+        }
+        
         // 마지막 시도가 아니면 재시도 전 약간의 지연
         if (attempt < retries) {
           const delay = 1000 * (attempt + 1);
@@ -137,7 +301,7 @@ async function safeFetch(url, options = {}, timeout = API_TIMEOUT, retries = 1) 
     
     // 모든 시도가 실패한 경우
     if (lastError.name === 'AbortError') {
-      throw new Error('요청 시간이 초과되었습니다. 네트워크 연결을 확인해주세요.');
+      throw new Error('요청 시간이 초과되었습니다. 온실 서버가 연결되어 있는지 확인해주세요.');
     }
     
     throw lastError;
