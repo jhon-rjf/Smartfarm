@@ -24,12 +24,12 @@ let autoModeSubscribers = [];
 
 // 자동제어 설정 관리
 let autoControlSettings = {
-  // 조명 제어 (온도가 낮으면 켜기)
+  // 조명 제어 (조도가 높으면 켜기 - 값이 높을수록 어두움)
   light: {
     enabled: true,
-    sensor: 'temperature',
-    condition: 'below', // below, above
-    threshold: 20,
+    sensor: 'light',
+    condition: 'above', // below, above
+    threshold: 800,
     action: 'on' // on, off
   },
   // 환풍기 제어 (CO2가 높으면 켜기)

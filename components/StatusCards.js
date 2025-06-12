@@ -9,6 +9,7 @@ export default function StatusCards({ onCardPress }) {
     power: 135.0,
     soil: 42.0,
     co2: 420.0, // 초기 CO₂ 수치
+    light: 50, // 초기 조도 수치
   });
 
   // 상태 데이터 로드
@@ -30,6 +31,7 @@ export default function StatusCards({ onCardPress }) {
         power: data.power,
         soil: data.soil,
         co2: data.co2, // CO2 포함
+        light: data.light, // 조도 포함
       });
     } catch (error) {
       console.error('상태 데이터 로드 오류:', error);
@@ -42,6 +44,7 @@ export default function StatusCards({ onCardPress }) {
     { label: '⚡ 전력', value: `${statusData.power?.toFixed(1) ?? '--'}W`, key: 'power' },
     { label: '🌱 토양 습도', value: `${statusData.soil?.toFixed(1) ?? '--'}%`, key: 'soil' },
     { label: '💨 CO₂', value: `${statusData.co2?.toFixed(1) ?? '--'} ppm`, key: 'co2' }, // CO2 카드
+    { label: '🌞 조도', value: `${statusData.light?.toFixed(0) ?? '--'}`, key: 'light' }, // 조도 카드
   ];
 
   return (

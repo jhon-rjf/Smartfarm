@@ -44,7 +44,7 @@ const SmartFarmScreen = ({ navigation, route }) => {
 
   // 자동제어 설정 상태 추가
   const [autoSettings, setAutoSettings] = useState({
-    light: { enabled: true, sensor: 'temperature', condition: 'below', threshold: 20, action: 'on' },
+    light: { enabled: true, sensor: 'light', condition: 'above', threshold: 800, action: 'on' },
     fan: { enabled: true, sensor: 'co2', condition: 'above', threshold: 450, action: 'on' },
     water: { enabled: true, sensor: 'soil', condition: 'below', threshold: 40, action: 'on' },
     window: { enabled: true, sensor: 'temperature', condition: 'above', threshold: 25, action: 'on' }
@@ -67,6 +67,7 @@ const SmartFarmScreen = ({ navigation, route }) => {
         if (data.humidity !== undefined) setSensorData(prev => ({ ...prev, humidity: data.humidity }));
         if (data.power !== undefined) setSensorData(prev => ({ ...prev, power: data.power }));
         if (data.soil !== undefined) setSensorData(prev => ({ ...prev, soil: data.soil }));
+        if (data.light !== undefined) setSensorData(prev => ({ ...prev, light: data.light }));
         
         // 기기 상태 업데이트
         if (data.devices) {
@@ -105,6 +106,7 @@ const SmartFarmScreen = ({ navigation, route }) => {
           power: status.power || 144,
           soil: status.soil || 46,
           co2: status.co2 || 410,
+          light: status.light || 50,
         });
         
         // 기기 상태 설정
@@ -152,6 +154,11 @@ const SmartFarmScreen = ({ navigation, route }) => {
         unit = 'ppm';
         status = value >= 350 && value <= 450 ? '😊 정상' : '😰 주의';
         break;
+      case 'light':
+        title = '조도';
+        unit = '';
+        status = value <= 500 ? '😊 밝음' : '😰 어두움';
+        break;
     }
     
     Alert.alert(
@@ -173,7 +180,7 @@ const SmartFarmScreen = ({ navigation, route }) => {
     setGlobalAutoMode(newAutoMode); // 전역 상태 업데이트
     Alert.alert(
       '자동모드',
-      `자동모드가 ${newAutoMode ? '켜졌습니다' : '꺼졌습니다'}.\n${newAutoMode ? '온도 조건에 따라 자동으로 기기가 제어됩니다.' : '수동으로만 기기를 제어할 수 있습니다.'}`,
+      `자동모드가 ${newAutoMode ? '켜졌습니다' : '꺼졌습니다'}.\n${newAutoMode ? '센서 조건에 따라 자동으로 기기가 제어됩니다.' : '수동으로만 기기를 제어할 수 있습니다.'}`,
       [{ text: '확인' }]
     );
   };
@@ -382,8 +389,13 @@ const SmartFarmScreen = ({ navigation, route }) => {
             <Text style={styles.gridButtonValue}>{sensorData.power}W</Text>
           </TouchableOpacity>
 
-          {/* 빈 공간 */}
-          <View style={styles.emptySpace} />
+          <TouchableOpacity 
+            style={[styles.gridButton, styles.infoButton]}
+            onPress={() => checkSensorData('light')}
+          >
+            <Text style={styles.gridButtonText}>조도</Text>
+            <Text style={styles.gridButtonValue}>{sensorData.light}</Text>
+          </TouchableOpacity>
         </View>
       </View>
     </View>
@@ -499,7 +511,7 @@ const SmartFarmScreen = ({ navigation, route }) => {
         {/* 조명 설정 */}
         <View style={styles.settingSection}>
           <Text style={styles.settingTitle}>조명 자동제어</Text>
-          <Text style={styles.settingDescription}>온도가 {autoSettings.light.threshold}°C 이하일 때 자동으로 켜기</Text>
+          <Text style={styles.settingDescription}>조도가 {autoSettings.light.threshold} 이상일 때 자동으로 켜기 (어두우면 켜짐)</Text>
           
           <TouchableOpacity 
             style={[styles.settingToggle, autoSettings.light.enabled ? styles.toggleActive : styles.toggleInactive]}
@@ -517,23 +529,23 @@ const SmartFarmScreen = ({ navigation, route }) => {
             <TouchableOpacity 
               style={styles.tempButton}
               onPress={() => {
-                const newTemp = Math.max(15, autoSettings.light.threshold - 1);
-                updateAutoControlSettings({ light: { ...autoSettings.light, threshold: newTemp } });
+                const newValue = Math.max(100, autoSettings.light.threshold - 50);
+                updateAutoControlSettings({ light: { ...autoSettings.light, threshold: newValue } });
               }}
             >
-              <Text style={styles.tempButtonText}>-1°C</Text>
+              <Text style={styles.tempButtonText}>-50</Text>
             </TouchableOpacity>
 
-            <Text style={styles.thresholdText}>{autoSettings.light.threshold}°C</Text>
+            <Text style={styles.thresholdText}>{autoSettings.light.threshold}</Text>
 
             <TouchableOpacity 
               style={styles.tempButton}
               onPress={() => {
-                const newTemp = Math.min(25, autoSettings.light.threshold + 1);
-                updateAutoControlSettings({ light: { ...autoSettings.light, threshold: newTemp } });
+                const newValue = Math.min(950, autoSettings.light.threshold + 50);
+                updateAutoControlSettings({ light: { ...autoSettings.light, threshold: newValue } });
               }}
             >
-              <Text style={styles.tempButtonText}>+1°C</Text>
+              <Text style={styles.tempButtonText}>+50</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -671,9 +683,10 @@ const SmartFarmScreen = ({ navigation, route }) => {
           <Text style={styles.settingInfo}>현재 온도: {sensorData.temperature}°C</Text>
           <Text style={styles.settingInfo}>현재 CO2: {sensorData.co2}ppm</Text>
           <Text style={styles.settingInfo}>현재 토양습도: {sensorData.soil}%</Text>
+          <Text style={styles.settingInfo}>현재 조도: {sensorData.light}</Text>
           
           <Text style={styles.settingInfo}>
-            조명: {autoSettings.light.enabled && autoMode && sensorData.temperature <= autoSettings.light.threshold ? '자동제어 활성' : '비활성'}
+            조명: {autoSettings.light.enabled && autoMode && sensorData.light >= autoSettings.light.threshold ? '자동제어 활성' : '비활성'}
           </Text>
           <Text style={styles.settingInfo}>
             환풍기: {autoSettings.fan.enabled && autoMode && sensorData.co2 >= autoSettings.fan.threshold ? '자동제어 활성' : '비활성'}

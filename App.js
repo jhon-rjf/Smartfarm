@@ -58,6 +58,14 @@ function HomeScreen({ navigation, userLocation }) {
   const [autoMode, setAutoMode] = useState(false);
   const [chartData, setChartData] = useState({});
   const [isLoadingChart, setIsLoadingChart] = useState(false);
+  const [currentSensorData, setCurrentSensorData] = useState({
+    temperature: 23.5,
+    humidity: 58.0,
+    power: 135.0,
+    soil: 42.0,
+    co2: 420.0,
+    light: 50,
+  });
 
   // 기본 더미 데이터 (API 실패시 사용)
   const fallbackMetricData = {
@@ -66,6 +74,7 @@ function HomeScreen({ navigation, userLocation }) {
     power: [130, 135, 140, 142, 144],
     soil: [40, 42, 45, 44, 46],
     co2: [400, 420, 430, 415, 410],
+    light: [45, 50, 55, 48, 52],
   };
 
   const metricTitles = {
@@ -74,6 +83,7 @@ function HomeScreen({ navigation, userLocation }) {
     power: '⚡ 전력 사용량 변화 (계산값)',
     soil: '🌱 토양 습도 변화',
     co2: '🟢 이산화탄소 농도 변화',
+    light: '🌞 조도 변화',
   };
 
   // 차트 데이터 로드 함수
@@ -124,10 +134,29 @@ function HomeScreen({ navigation, userLocation }) {
   const currentChartData = chartData[selectedMetric] || fallbackMetricData[selectedMetric];
   console.log(`[HomeScreen] ${selectedMetric} 현재 차트 데이터:`, currentChartData);
   
-  // 디바이스 제어용 현재 값들 (더미 데이터 유지)
-  const currentTemperature = fallbackMetricData.temperature[fallbackMetricData.temperature.length - 1];
-  const currentCo2 = fallbackMetricData.co2[fallbackMetricData.co2.length - 1];
-  const currentSoil = fallbackMetricData.soil[fallbackMetricData.soil.length - 1];
+  // 현재 센서 데이터 로드 함수
+  const loadCurrentSensorData = async () => {
+    try {
+      const { fetchStatus } = await import('./services/api');
+      const data = await fetchStatus();
+      setCurrentSensorData({
+        temperature: data.temperature || fallbackMetricData.temperature[fallbackMetricData.temperature.length - 1],
+        humidity: data.humidity || fallbackMetricData.humidity[fallbackMetricData.humidity.length - 1],
+        power: data.power || fallbackMetricData.power[fallbackMetricData.power.length - 1],
+        soil: data.soil || fallbackMetricData.soil[fallbackMetricData.soil.length - 1],
+        co2: data.co2 || fallbackMetricData.co2[fallbackMetricData.co2.length - 1],
+        light: data.light || fallbackMetricData.light[fallbackMetricData.light.length - 1],
+      });
+    } catch (error) {
+      console.error('현재 센서 데이터 로드 오류:', error);
+    }
+  };
+
+  // 디바이스 제어용 현재 값들
+  const currentTemperature = currentSensorData.temperature;
+  const currentCo2 = currentSensorData.co2;
+  const currentSoil = currentSensorData.soil;
+  const currentLight = currentSensorData.light;
 
   useEffect(() => {
     (async () => {
@@ -139,6 +168,12 @@ function HomeScreen({ navigation, userLocation }) {
       }
     })();
 
+    // 초기 센서 데이터 로드
+    loadCurrentSensorData();
+
+    // 주기적으로 센서 데이터 업데이트 (30초마다)
+    const sensorInterval = setInterval(loadCurrentSensorData, 30000);
+
     // 자동모드 상태 실시간 구독
     const unsubscribeAutoMode = subscribeToAutoModeUpdates((enabled) => {
       setAutoMode(enabled);
@@ -146,6 +181,7 @@ function HomeScreen({ navigation, userLocation }) {
 
     return () => {
       unsubscribeAutoMode();
+      clearInterval(sensorInterval);
     };
   }, []);
 
@@ -190,6 +226,7 @@ function HomeScreen({ navigation, userLocation }) {
               currentTemperature={currentTemperature}
               currentCo2={currentCo2}
               currentSoil={currentSoil}
+              currentLight={currentLight}
             />
             
             {/* 자동모드 제어 버튼들 */}

@@ -13,7 +13,7 @@ import { getAutoControlSettings, updateAutoControlSettings, subscribeToAutoContr
 export default function AutoModeSettingsScreen({ navigation }) {
   // 자동제어 설정 상태
   const [autoSettings, setAutoSettings] = useState({
-    light: { enabled: true, sensor: 'temperature', condition: 'below', threshold: 20, action: 'on' },
+    light: { enabled: true, sensor: 'light', condition: 'above', threshold: 800, action: 'on' },
     fan: { enabled: true, sensor: 'co2', condition: 'above', threshold: 450, action: 'on' },
     water: { enabled: true, sensor: 'soil', condition: 'below', threshold: 40, action: 'on' },
     window: { enabled: true, sensor: 'temperature', condition: 'above', threshold: 25, action: 'on' }
@@ -26,6 +26,7 @@ export default function AutoModeSettingsScreen({ navigation }) {
     power: 144,
     soil: 46,
     co2: 410,
+    light: 50,
   });
 
   // 자동모드 상태
@@ -42,6 +43,7 @@ export default function AutoModeSettingsScreen({ navigation }) {
         if (data.power !== undefined) setSensorData(prev => ({ ...prev, power: data.power }));
         if (data.soil !== undefined) setSensorData(prev => ({ ...prev, soil: data.soil }));
         if (data.co2 !== undefined) setSensorData(prev => ({ ...prev, co2: data.co2 }));
+        if (data.light !== undefined) setSensorData(prev => ({ ...prev, light: data.light }));
       }
     });
 
@@ -72,6 +74,7 @@ export default function AutoModeSettingsScreen({ navigation }) {
           power: status.power || 144,
           soil: status.soil || 46,
           co2: status.co2 || 410,
+          light: status.light || 50,
         });
       }
 
@@ -107,13 +110,14 @@ export default function AutoModeSettingsScreen({ navigation }) {
           <Text style={styles.statusText}>온도: {sensorData.temperature}°C</Text>
           <Text style={styles.statusText}>CO2: {sensorData.co2}ppm</Text>
           <Text style={styles.statusText}>토양습도: {sensorData.soil}%</Text>
+          <Text style={styles.statusText}>조도: {sensorData.light}</Text>
         </View>
 
         {/* 조명 자동제어 설정 */}
         <View style={styles.settingCard}>
           <Text style={styles.cardTitle}>조명 자동제어</Text>
           <Text style={styles.cardDescription}>
-            온도가 {autoSettings.light.threshold}°C 이하일 때 자동으로 켜기
+            조도가 {autoSettings.light.threshold} 이상일 때 자동으로 켜기 (어두우면 켜짐)
           </Text>
           
           <TouchableOpacity 
@@ -129,28 +133,28 @@ export default function AutoModeSettingsScreen({ navigation }) {
             <TouchableOpacity 
               style={styles.adjustButton}
               onPress={() => {
-                const newTemp = Math.max(15, autoSettings.light.threshold - 1);
-                updateSetting('light', { threshold: newTemp });
+                const newValue = Math.max(100, autoSettings.light.threshold - 50);
+                updateSetting('light', { threshold: newValue });
               }}
             >
-              <Text style={styles.adjustButtonText}>-1°C</Text>
+              <Text style={styles.adjustButtonText}>-50</Text>
             </TouchableOpacity>
 
-            <Text style={styles.thresholdValue}>{autoSettings.light.threshold}°C</Text>
+            <Text style={styles.thresholdValue}>{autoSettings.light.threshold}</Text>
 
             <TouchableOpacity 
               style={styles.adjustButton}
               onPress={() => {
-                const newTemp = Math.min(25, autoSettings.light.threshold + 1);
-                updateSetting('light', { threshold: newTemp });
+                const newValue = Math.min(950, autoSettings.light.threshold + 50);
+                updateSetting('light', { threshold: newValue });
               }}
             >
-              <Text style={styles.adjustButtonText}>+1°C</Text>
+              <Text style={styles.adjustButtonText}>+50</Text>
             </TouchableOpacity>
           </View>
 
           <Text style={styles.statusIndicator}>
-            상태: {autoSettings.light.enabled && autoMode && sensorData.temperature <= autoSettings.light.threshold ? '자동제어 활성' : '비활성'}
+            상태: {autoSettings.light.enabled && autoMode && sensorData.light >= autoSettings.light.threshold ? '자동제어 활성' : '비활성'}
           </Text>
         </View>
 

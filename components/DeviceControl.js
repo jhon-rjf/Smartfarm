@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { fetchStatus, controlDevice, subscribeToStatusUpdates, getAutoMode, subscribeToAutoModeUpdates, setAutoMode, getAutoControlSettings, subscribeToAutoControlSettings } from '../services/api';
 
-export default function DeviceControl({ currentTemperature, currentCo2, currentSoil }) {
+export default function DeviceControl({ currentTemperature, currentCo2, currentSoil, currentLight }) {
   const [devices, setDevices] = useState({
     fan: false,
     water: false,
@@ -13,7 +13,7 @@ export default function DeviceControl({ currentTemperature, currentCo2, currentS
   const [autoMode, setAutoMode] = useState(false);
   const [lastAutoAction, setLastAutoAction] = useState(null); // 마지막 자동 제어 기록
   const [autoSettings, setAutoSettings] = useState({
-    light: { enabled: true, sensor: 'temperature', condition: 'below', threshold: 20, action: 'on' },
+    light: { enabled: true, sensor: 'light', condition: 'above', threshold: 800, action: 'on' },
     fan: { enabled: true, sensor: 'co2', condition: 'above', threshold: 450, action: 'on' },
     water: { enabled: true, sensor: 'soil', condition: 'below', threshold: 40, action: 'on' },
     window: { enabled: true, sensor: 'temperature', condition: 'above', threshold: 25, action: 'on' }
@@ -90,10 +90,11 @@ export default function DeviceControl({ currentTemperature, currentCo2, currentS
       temperature: currentTemperature,
       co2: currentCo2,
       soil: currentSoil,
+      light: currentLight,
     };
 
-    // 조명 제어 (온도 기반)
-    checkAndControlDevice('light', autoSettings.light, sensorValues.temperature);
+    // 조명 제어 (조도센서 기반)
+    checkAndControlDevice('light', autoSettings.light, sensorValues.light);
     
     // 환풍기 제어 (CO2 기반)
     checkAndControlDevice('fan', autoSettings.fan, sensorValues.co2);
@@ -104,7 +105,7 @@ export default function DeviceControl({ currentTemperature, currentCo2, currentS
     // 창문 제어 (온도 기반)
     checkAndControlDevice('window', autoSettings.window, sensorValues.temperature);
 
-  }, [autoMode, autoSettings, currentTemperature, currentCo2, currentSoil, devices]);
+  }, [autoMode, autoSettings, currentTemperature, currentCo2, currentSoil, currentLight, devices]);
 
   const loadDeviceStatus = async () => {
     try {

@@ -78,6 +78,7 @@ def get_status():
         "power": current_values["power"],
         "soil": current_values["soil"],
         "co2": current_values["co2"],
+        "light": current_values["light"],
         "devices": simulator.device_status,
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     })
@@ -86,7 +87,7 @@ def get_status():
 def get_history():
     """측정 항목의 기록 데이터를 반환합니다."""
     metric = request.args.get('metric', 'temperature')
-    if metric not in ["temperature", "humidity", "power", "soil", "co2"]:
+    if metric not in ["temperature", "humidity", "power", "soil", "co2", "light"]:
         return jsonify({"error": "유효하지 않은 측정 항목입니다."}), 400
     
     # InfluxDB에서 데이터 가져오기 시도

@@ -45,6 +45,7 @@ class SensorDataManager:
             "power": 135.0,       # 와트 (계산값 - 센서 없음)
             "soil": 42.0,         # 퍼센트
             "co2": 420.0,         # ppm (CO2 센서)
+            "light": 35,          # 조도 센서 (5-95, 낮을수록 어두움)
         }
         
         # 제공된 초기값이 있으면 업데이트
@@ -74,7 +75,8 @@ class SensorDataManager:
             "humidity": [],
             "power": [],
             "soil": [],
-            "co2": []
+            "co2": [],
+            "light": []
         }
         
         # 아두이노 연결 시도
@@ -199,6 +201,9 @@ class SensorDataManager:
     def _parse_arduino_data(self, data_line):
         """아두이노에서 받은 데이터를 파싱합니다."""
         try:
+            # 원시 데이터 로깅 추가
+            print(f"[DEBUG] 아두이노 원시 데이터: {data_line}")
+            
             # "온도: 25.0 °C, 습도: 60.5 %, CO2: 350, 조도: 15, 토양 수분: 650" 형태의 데이터 파싱
             with self.data_lock:
                 temp_match = re.search(r'온도:\s*([\d.]+)', data_line)
@@ -209,16 +214,21 @@ class SensorDataManager:
                 
                 if temp_match:
                     self.arduino_sensor_data['temperature'] = float(temp_match.group(1))
+                    print(f"[DEBUG] 온도 파싱: {temp_match.group(1)}")
                 if humidity_match:
                     self.arduino_sensor_data['humidity'] = float(humidity_match.group(1))
+                    print(f"[DEBUG] 습도 파싱: {humidity_match.group(1)}")
                 if co2_match:
                     self.arduino_sensor_data['co2'] = int(co2_match.group(1))
+                    print(f"[DEBUG] CO2 파싱: {co2_match.group(1)}")
                 if light_match:
                     self.arduino_sensor_data['light'] = int(light_match.group(1))
+                    print(f"[DEBUG] 조도 파싱: {light_match.group(1)}")
                 if soil_match:
                     # 아두이노의 토양수분 값을 퍼센트로 변환 (0-1023 → 0-100)
                     soil_raw = int(soil_match.group(1))
                     self.arduino_sensor_data['soil'] = round(max(0, 100 - (soil_raw / 1023 * 100)), 1)
+                    print(f"[DEBUG] 토양수분 파싱: {soil_raw} -> {self.arduino_sensor_data['soil']}%")
                 
         except Exception as e:
             print(f"아두이노 데이터 파싱 오류: {e}")
@@ -264,6 +274,10 @@ class SensorDataManager:
             self.history["co2"].append({
                 "timestamp": timestamp, 
                 "value": round(self.current_values["co2"] + np.random.uniform(-20, 20), 1)
+            })
+            self.history["light"].append({
+                "timestamp": timestamp, 
+                "value": round(self.current_values["light"] + np.random.uniform(-10, 10), 1)
             })
     
     def _calculate_power_consumption(self):
@@ -320,6 +334,10 @@ class SensorDataManager:
                 if 'co2' in self.arduino_sensor_data:
                     self.current_values["co2"] = self.arduino_sensor_data['co2']
                 
+                if 'light' in self.arduino_sensor_data:
+                    self.current_values["light"] = self.arduino_sensor_data['light']
+                    print(f"[DEBUG] 조도센서 값 업데이트: {self.arduino_sensor_data['light']}")
+                
                 # 전력은 항상 계산값 사용 (센서 없음)
                 self.current_values["power"] = self._calculate_power_consumption()
         else:
@@ -329,6 +347,7 @@ class SensorDataManager:
             self.current_values["power"] = round(self.current_values["power"] + np.random.uniform(-2, 2), 1)
             self.current_values["soil"] = round(self.current_values["soil"] + np.random.uniform(-0.5, 0.5), 1)
             self.current_values["co2"] = round(self.current_values["co2"] + np.random.uniform(-10, 10), 1)
+            self.current_values["light"] = round(self.current_values["light"] + np.random.uniform(-6, 6), 1)
             
             # 장치 상태에 따른 값 변화 시뮬레이션
             if self.device_status["fan"]:
@@ -345,6 +364,8 @@ class SensorDataManager:
                 self.current_values["temperature"] += 0.1
                 self.current_values["co2"] -= 2  # 광합성으로 CO2 소모
                 self.current_values["power"] += 10.0  # LED 동작시 전력 증가
+                # LED가 켜지면 조도 상승
+                self.current_values["light"] += 10
             
             if self.device_status["window"]:
                 external_humidity = 50 + np.random.uniform(-10, 10)
@@ -355,6 +376,11 @@ class SensorDataManager:
                 self.current_values["co2"] = round(
                     0.8 * self.current_values["co2"] + 0.2 * 400, 1
                 )
+                # 창문 열림시 외부 빛 유입
+                external_light = 50 + np.random.uniform(-15, 15)  # 외부 조도
+                self.current_values["light"] = round(
+                    0.7 * self.current_values["light"] + 0.3 * external_light, 1
+                )
         
         # 값 범위 제한
         self.current_values["temperature"] = max(min(self.current_values["temperature"], 40), 10)
@@ -362,6 +388,7 @@ class SensorDataManager:
         self.current_values["power"] = max(min(self.current_values["power"], 300), 50)
         self.current_values["soil"] = max(min(self.current_values["soil"], 100), 0)
         self.current_values["co2"] = max(min(self.current_values["co2"], 2000), 300)
+        self.current_values["light"] = max(min(self.current_values["light"], 1000), 1)  # 실제 센서 범위 1-1000으로 조정
         
         # InfluxDB에 센서 데이터 저장
         if INFLUXDB_AVAILABLE:
