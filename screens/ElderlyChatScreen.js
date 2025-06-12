@@ -690,11 +690,9 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eee',
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
   },
   backButton: {
-    position: 'absolute',
-    left: scale(10),
-    top: verticalScale(30),
     backgroundColor: 'rgba(255,255,255,0.3)',
     paddingHorizontal: scale(8),
     paddingVertical: verticalScale(6),
@@ -709,10 +707,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   headerTitle: {
+    flex: 1,
     fontSize: moderateScale(24),
     fontWeight: 'bold',
     color: '#333',
     textAlign: 'center',
+    marginHorizontal: scale(10),
   },
   chatContainer: {
     flex: 1,
