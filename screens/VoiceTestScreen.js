@@ -97,7 +97,10 @@ const SmartFarmScreen = ({ navigation, route }) => {
   const loadInitialData = async () => {
     try {
       setIsLoading(true);
+      console.log('[VoiceTestScreen] 초기 데이터 로드 중...');
       const status = await fetchStatus();
+      console.log('[VoiceTestScreen] 수신된 상태 데이터:', status);
+      
       if (status) {
         // 센서 데이터 설정
         setSensorData({
@@ -109,13 +112,34 @@ const SmartFarmScreen = ({ navigation, route }) => {
           light: status.light || 50,
         });
         
-        // 기기 상태 설정
-        if (status.devices) {
-          setDeviceStatus(status.devices);
-        }
+        // 기기 상태 설정 (백엔드 기본값: 모두 false)
+        const deviceState = status.devices || {
+          fan: false,
+          water: false,
+          light: false,
+          window: false,
+        };
+        setDeviceStatus(deviceState);
+        console.log('[VoiceTestScreen] 장치 상태 설정 완료:', deviceState);
+      } else {
+        console.warn('[VoiceTestScreen] 상태 데이터가 없어 기본값 사용');
+        // 백엔드 기본값으로 설정
+        setDeviceStatus({
+          fan: false,
+          water: false,
+          light: false,
+          window: false,
+        });
       }
     } catch (error) {
-      console.error('초기 데이터 로드 오류:', error);
+      console.error('[VoiceTestScreen] 초기 데이터 로드 오류:', error);
+      // 오류 시에도 백엔드 기본값으로 설정
+      setDeviceStatus({
+        fan: false,
+        water: false,
+        light: false,
+        window: false,
+      });
       Alert.alert('오류', '데이터를 불러오는 중 오류가 발생했습니다.');
     } finally {
       setIsLoading(false);

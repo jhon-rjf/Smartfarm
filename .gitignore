@@ -1,0 +1,23 @@
+# 의존성 폴더
+node_modules/
+__pycache__/
+
+# 환경설정 (보안)
+.env
+.env.local
+
+# 빌드 파일
+.expo/
+build/
+dist/
+
+# 로그 파일
+*.log
+
+# 백업 파일
+*.backup
+*.bck
+
+# 시스템 파일
+.DS_Store
+Thumbs.db

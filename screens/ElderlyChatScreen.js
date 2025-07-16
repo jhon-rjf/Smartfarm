@@ -50,6 +50,7 @@ export default function ElderlyChatScreen({ navigation, userLocation = '서울' 
   const [deviceStatus, setDeviceStatus] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [safeLocation, setSafeLocation] = useState(userLocation || '서울');
+  const [isUserScrolling, setIsUserScrolling] = useState(false);
 
   const listRef = useRef(null);
 
@@ -614,7 +615,21 @@ export default function ElderlyChatScreen({ navigation, userLocation = '서울' 
           renderItem={renderItem}
           keyExtractor={(_, index) => index.toString()}
           contentContainerStyle={styles.chatList}
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+          onContentSizeChange={() => {
+            if (!isUserScrolling) {
+              listRef.current?.scrollToEnd({ animated: true });
+            }
+          }}
+          onScroll={(event) => {
+            const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+            // 사용자가 맨 아래에서 20px 이상 위로 스크롤하면 사용자 스크롤 중으로 판단
+            if (contentOffset.y < contentSize.height - layoutMeasurement.height - 20) {
+              setIsUserScrolling(true);
+            } else {
+              setIsUserScrolling(false);
+            }
+          }}
+          scrollEventThrottle={16}
           showsVerticalScrollIndicator={false}
         />
 

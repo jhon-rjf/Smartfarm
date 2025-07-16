@@ -56,7 +56,15 @@ function FloatingButtons({ navigation }) {
 function HomeScreen({ navigation, userLocation }) {
   const [selectedMetric, setSelectedMetric] = useState('temperature');
   const [autoMode, setAutoMode] = useState(false);
-  const [chartData, setChartData] = useState({});
+  // 기본 더미 데이터로 초기화하여 서버 종료 시에도 그래프가 표시되도록 함
+  const [chartData, setChartData] = useState({
+    temperature: [22, 23, 24, 24, 25],
+    humidity: [55, 58, 60, 59, 61],
+    power: [130, 135, 140, 142, 144],
+    soil: [40, 42, 45, 44, 46],
+    co2: [400, 420, 430, 415, 410],
+    light: [45, 50, 55, 48, 52],
+  });
   const [isLoadingChart, setIsLoadingChart] = useState(false);
   const [currentSensorData, setCurrentSensorData] = useState({
     temperature: 23.5,
@@ -120,11 +128,19 @@ function HomeScreen({ navigation, userLocation }) {
       }
     } catch (error) {
       console.error(`[HomeScreen] ${metric} 차트 데이터 로드 오러:`, error);
-      // 오류 시 더미 데이터 사용
-      setChartData(prev => ({
-        ...prev,
-        [metric]: fallbackMetricData[metric]
-      }));
+      // 오류 시 기존 데이터가 있으면 유지, 없으면 더미 데이터 사용
+      setChartData(prev => {
+        if (!prev[metric] || prev[metric].length === 0) {
+          console.log(`[HomeScreen] ${metric} 더미 데이터로 초기화`);
+          return {
+            ...prev,
+            [metric]: fallbackMetricData[metric]
+          };
+        } else {
+          console.log(`[HomeScreen] ${metric} 기존 데이터 유지:`, prev[metric]);
+          return prev; // 기존 데이터 유지
+        }
+      });
     } finally {
       setIsLoadingChart(false);
     }
@@ -348,11 +364,11 @@ export default function App() {
         screenOptions={({ route }) => ({
           tabBarIcon: ({ focused, color, size }) => {
             let iconName;
-            if (route.name === 'Home') {
+            if (route.name === 'ElderlyHome') {
               iconName = focused ? 'ios-home' : 'ios-home-outline';
             } else if (route.name === 'Chatbot') {
               iconName = focused ? 'ios-chatbubble' : 'ios-chatbubble-outline';
-            } else if (route.name === 'VoiceTest') {
+            } else if (route.name === 'GeneralUser') {
               iconName = focused ? 'ios-settings' : 'ios-settings-outline';
             }
             return <Ionicons name={iconName} size={size} color={color} />;
@@ -368,17 +384,20 @@ export default function App() {
           headerShown: false,
         })}
       >
-        <Tab.Screen name="Home">
-          {props => <HomeStackNavigator {...props} userLocation={userLocation} />}
+        <Tab.Screen
+          name="ElderlyHome"
+          options={{ tabBarLabel: '노인맞춤 제어' }}
+        >
+          {props => <VoiceTestStackNavigator {...props} userLocation={userLocation} />}
         </Tab.Screen>
         <Tab.Screen name="Chatbot">
           {props => <ChatbotScreen {...props} userLocation={userLocation} />}
         </Tab.Screen>
         <Tab.Screen
-          name="VoiceTest"
-          options={{ tabBarLabel: '노인맞춤 제어' }}
+          name="GeneralUser"
+          options={{ tabBarLabel: '일반사용자보기' }}
         >
-          {props => <VoiceTestStackNavigator {...props} userLocation={userLocation} />}
+          {props => <HomeStackNavigator {...props} userLocation={userLocation} />}
         </Tab.Screen>
       </Tab.Navigator>
     </NavigationContainer>

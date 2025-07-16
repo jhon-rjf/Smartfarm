@@ -9,6 +9,7 @@ export default function DeviceControl({ currentTemperature, currentCo2, currentS
     light: false,
     window: false,
   });
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
 
   const [autoMode, setAutoMode] = useState(false);
   const [lastAutoAction, setLastAutoAction] = useState(null); // 마지막 자동 제어 기록
@@ -20,10 +21,17 @@ export default function DeviceControl({ currentTemperature, currentCo2, currentS
   });
 
   useEffect(() => {
-    loadDeviceStatus();
+    // 초기 장치 상태 로드
+    const initializeDeviceStatus = async () => {
+      await loadDeviceStatus();
+      setInitialLoadComplete(true);
+    };
+    
+    initializeDeviceStatus();
 
     const unsubscribe = subscribeToStatusUpdates((data) => {
       if (data && data.devices) {
+        console.log('[DeviceControl] 상태 업데이트 수신:', data.devices);
         setDevices(data.devices);
       }
     });
@@ -109,12 +117,25 @@ export default function DeviceControl({ currentTemperature, currentCo2, currentS
 
   const loadDeviceStatus = async () => {
     try {
+      console.log('[DeviceControl] 초기 장치 상태 로드 중...');
       const status = await fetchStatus();
+      console.log('[DeviceControl] 수신된 장치 상태:', status?.devices);
+      
       if (status && status.devices) {
         setDevices(status.devices);
+        console.log('[DeviceControl] 장치 상태 업데이트 완료:', status.devices);
+      } else {
+        console.warn('[DeviceControl] 장치 상태 데이터가 없습니다');
       }
     } catch (error) {
-      console.error('장치 상태 로드 실패:', error);
+      console.error('[DeviceControl] 장치 상태 로드 실패:', error);
+      // 오류 시에도 백엔드 기본값(모두 false)으로 설정
+      setDevices({
+        fan: false,
+        water: false,
+        light: false,
+        window: false,
+      });
     }
   };
 

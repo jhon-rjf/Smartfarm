@@ -9,7 +9,7 @@ const getApiUrl = () => {
   // 개발 환경에서는 환경 변수 확인
   if (__DEV__) {
     // 개발자가 직접 설정 가능 - 임시로 고정 URL 사용
-    const MANUAL_API_URL = 'http://192.168.0.7:5001'; // 현재 작동하는 IP로 고정
+    const MANUAL_API_URL = 'http://192.168.0.14:5001'; // 현재 작동하는 IP로 고정
     if (MANUAL_API_URL) {
       console.log('[API] 수동 설정된 API URL 사용:', MANUAL_API_URL);
       return MANUAL_API_URL;
@@ -22,7 +22,7 @@ const getApiUrl = () => {
   }
   
   // 기본값 (로컬 개발)
-  return process.env.EXPO_PUBLIC_API_URL || 'http://192.168.0.7:5001';
+  return process.env.EXPO_PUBLIC_API_URL || 'http://192.168.0.14:5001';
 };
 
 const API_URL = getApiUrl();
